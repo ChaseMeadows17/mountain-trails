@@ -896,6 +896,10 @@ function viewSettings() {
       ${toggle('notifications', 'Phone notifications', permNote)}
       ${toggle('shakeReminders', 'Daily shake reminders', 'Show a "shaken today" check on each infusing jar.')}
     </section>
+    <section class="group"><h2>App</h2>
+      <div class="row"><div class="label">Get the latest version<small>Reloads the app with any new updates. Your data and sign-in stay as they are.</small></div>
+        <button class="btn ghost" data-act="refresh-app" style="min-height:40px">Update</button></div>
+    </section>
     <section class="group"><h2>Backup file</h2>
       <div class="row"><div class="label">Save a backup<small>Everything is already saved to your account. This makes an extra copy as a file.</small></div>
         <button class="btn ghost" data-act="export" style="min-height:40px">Save</button></div>
@@ -1371,6 +1375,7 @@ function bindView() {
     else if (act === 'export') exportData();
     else if (act === 'sign-out') signOut();
     else if (act === 'sync-now') pullChanges().then(() => toast(syncText()));
+    else if (act === 'refresh-app') refreshApp();
   };
 
   v.onkeydown = e => {
@@ -1451,6 +1456,20 @@ function rerenderKeepingFocus(sel) {
   const el = $(sel);
   el.focus();
   el.setSelectionRange(pos, pos);
+}
+
+// Settings → App → Update: saves anything pending, drops the phone's saved copy of the app
+// files, and reloads so the newest version from GitHub is used. Data and sign-in are kept.
+async function refreshApp() {
+  if (!navigator.onLine) { toast('Connect to the internet to get updates.'); return; }
+  toast('Getting the latest version…');
+  await pushChanges();
+  try {
+    const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg) await reg.update();
+    if ('caches' in window) for (const key of await caches.keys()) await caches.delete(key);
+  } catch (e) { /* reload anyway */ }
+  location.reload();
 }
 
 /* ================= Welcome ================= */
