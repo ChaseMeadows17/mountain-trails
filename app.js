@@ -875,6 +875,8 @@ function viewSettings() {
     <section class="group"><h2>Account</h2>
       <div class="row"><div class="label">Signed in${member ? ` · ${ROLE_LABEL[member.role]}` : ''}<small>${esc(session?.user?.email || 'Not signed in')}</small></div>
         <button class="btn ghost" data-act="sign-out" style="min-height:40px">Sign out</button></div>
+      <div class="row"><div class="label">Your name<small>Used to greet you when the app opens.</small></div>
+        <input class="name-input" id="my-name" value="${esc(session?.user?.user_metadata?.name || '')}" placeholder="First name" autocomplete="given-name" aria-label="Your name"></div>
       <div class="row"><div class="label">Cloud backup<small id="sync-status">${esc(syncText())}</small></div>
         <button class="btn ghost" data-act="sync-now" style="min-height:40px">Sync now</button></div>
     </section>
@@ -1391,6 +1393,12 @@ function bindView() {
   const imp = $('#import', v);
   if (imp) imp.onchange = () => { if (imp.files[0]) importData(imp.files[0]); imp.value = ''; };
   if ($('#people-list', v)) bindPeople(v);
+  const myName = $('#my-name', v);
+  if (myName) myName.onchange = async () => {
+    const name = myName.value.trim();
+    const { error } = sb && session ? await sb.auth.updateUser({ data: { name } }) : { error: true };
+    toast(error ? 'Connect to the internet to save your name.' : name ? `Nice to meet you, ${name}.` : 'Name removed.');
+  };
 }
 
 /* ---------- People (owners only) ---------- */
@@ -1445,6 +1453,71 @@ function rerenderKeepingFocus(sel) {
   el.setSelectionRange(pos, pos);
 }
 
+/* ================= Welcome ================= */
+
+// One helpful line for the welcome screen: what's ready, what needs doing, or what's next.
+function welcomeLine() {
+  const batches = allBatches();
+  const ready = batches.filter(x => x.info.ready);
+  if (ready.length === 1) return `${ready[0].b.name} is ready`;
+  if (ready.length > 1) return `${ready.length} batches are ready`;
+  const toBottle = state.inventory.filter(needsBottling).length;
+  if (toBottle) return `${toBottle} ${toBottle === 1 ? 'batch' : 'batches'} to bottle`;
+  const toLabel = state.inventory.filter(needsLabel).length;
+  if (toLabel) return `${toLabel} ${toLabel === 1 ? 'batch' : 'batches'} to label`;
+  const next = batches.find(x => !x.info.ready);
+  if (next) return `Next up: ${next.b.name}, ${whenText(next.info.left).toLowerCase()}`;
+  return '';
+}
+
+// Her mountains drawn in ink, with the sun (or moon) rising behind them.
+function welcomeArt(part) {
+  const night = part === 'evening';
+  const sunY = { morning: 64, afternoon: 46, evening: 50 }[part];
+  return `<svg viewBox="0 0 300 160" aria-hidden="true">
+    ${night ? [[40, 30], [70, 18], [235, 26], [262, 44], [205, 14], [120, 22], [282, 16]].map(([x, y], i) =>
+      `<circle class="w-star" style="animation-delay:${0.6 + i * 0.15}s" cx="${x}" cy="${y}" r="1.4"/>`).join('') : ''}
+    <g class="w-sun"><circle cx="118" cy="${sunY}" r="24" class="${night ? 'w-moon' : 'w-sunball'}"/>
+      ${night ? '<circle cx="110" cy="44" r="3.5" class="w-crater"/><circle cx="126" cy="58" r="2.5" class="w-crater"/>' : ''}</g>
+    <path class="w-fill" d="M8 140 L62 92 L80 104 L132 40 L160 74 L178 62 L196 80 L222 58 L292 140 Z"/>
+    <path class="w-draw" pathLength="1" d="M8 140 L62 92 L80 104 L132 40 L160 74 L178 62 L196 80 L222 58 L292 140"/>
+    <path class="w-draw w-thin" pathLength="1" style="animation-delay:.5s" d="M132 40 L122 62 L128 60 L118 84 M222 58 L214 76 L219 74 L210 92 M62 92 L70 106 M178 62 L172 78"/>
+    <path class="w-draw w-hatch" pathLength="1" style="animation-delay:.7s" d="M96 92 L120 64 M90 104 L118 72 M86 116 L116 82 M196 96 L214 76 M192 108 L212 86"/>
+    <g class="w-trees">${[[20, 140, 1], [30, 140, 1.3], [42, 140, 0.9], [250, 140, 1.2], [262, 140, 0.9], [274, 140, 1.4], [150, 140, 0.8], [160, 140, 1.1]].map(([x, y, s]) =>
+      `<path d="M${x} ${y} l${-6 * s} 0 l${4 * s} ${-7 * s} l${-3 * s} 0 l${5 * s} ${-9 * s} l${5 * s} ${9 * s} l${-3 * s} 0 l${4 * s} ${7 * s} z"/>`).join('')}</g>
+    <path class="w-draw w-ground" pathLength="1" d="M4 141 L296 141"/>
+  </svg>`;
+}
+
+function showWelcome() {
+  if ($('#welcome')) return;
+  const h = new Date().getHours();
+  const part = h >= 5 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'afternoon' : 'evening';
+  const name = session?.user?.user_metadata?.name;
+  const line = session && member ? welcomeLine() : '';
+  const el = document.createElement('div');
+  el.id = 'welcome';
+  el.className = `welcome ${part}`;
+  el.setAttribute('role', 'status');
+  el.innerHTML = `
+    <div class="w-scene">${welcomeArt(part)}</div>
+    <div class="w-title">Mountain Trails</div>
+    <div class="w-sub">Wellness Studio</div>
+    <div class="w-greet">Good ${part}${name ? `, ${esc(name)}` : ''}</div>
+    ${line ? `<div class="w-line">${esc(line)}</div>` : ''}
+    <div class="w-skip">Tap to skip</div>`;
+  document.body.appendChild(el);
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 450);
+  };
+  el.addEventListener('click', close);
+  setTimeout(close, line ? 3000 : 2600);
+}
+
 /* ================= Boot ================= */
 
 $$('.tabbar .ti').forEach(el => { el.innerHTML = ICONS[el.dataset.icon]; });
@@ -1462,17 +1535,26 @@ async function boot() {
       else if (event === 'SIGNED_IN' && !wasSignedIn) setTimeout(enterApp);
       else if (event === 'SIGNED_OUT' && wasSignedIn) setTimeout(() => showSignIn('You\'ve been signed out. Please sign in again.'));
     });
+    showWelcome();
     if (session) enterApp(); else showSignIn();
   } else if (cfg.supabaseUrl && state.tinctures.concat(state.salves, state.inventory, state.recipes).length) {
     // The sign-in library couldn't load (offline, first open of the day): use what's on the phone.
+    showWelcome();
     enterApp();
   } else {
+    showWelcome();
     showSignIn();
   }
 }
 
 boot();
 setInterval(() => { if (document.body.classList.contains('signed-out')) return; render(); checkReminders(); }, 60 * 60 * 1000);
+// Coming back to the app after a minute or more counts as opening it again.
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 60 * 1000 && !$('#sheet-root').firstChild) showWelcome();
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || document.body.classList.contains('signed-out')) return;
   if (!$('#sheet-root').firstChild) { render(); checkReminders(); }
