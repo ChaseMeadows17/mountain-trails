@@ -204,7 +204,9 @@ function go(tab) {
 }
 
 function render() {
-  $$('.tabbar button').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
+  $$('.tabbar button, .sidebar [data-tab]').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
+  const who = $('#side-user');
+  if (who) who.innerHTML = session ? `<b>${esc(session.user.user_metadata?.name || session.user.email)}</b><small>${member ? ROLE_LABEL[member.role] : ''}</small>` : '';
   const v = $('#view');
   if (ui.tab === 'home') v.innerHTML = viewHome();
   else if (ui.tab === 'infusing') v.innerHTML = viewBatches('tincture');
@@ -336,18 +338,19 @@ function viewHome() {
       ${tile(finishedMonth, 'Made this month', 'inventory')}
     </div>
 
-    <section class="panel">
+    <div class="home-grid">
+    <section class="panel att">
       <h2>Needs attention</h2>
       ${attention || `<p class="caught">${ICONS.jar}<span>All caught up. Nothing to strain, bottle or label.</span></p>`}
     </section>
 
-    <section class="panel">
+    <section class="panel com">
       <h2>Coming up</h2>
       ${timeline ? `<ol class="timeline">${timeline}</ol>` : '<p class="caught"><span>Nothing infusing right now.</span></p>'}
       ${groups.length > 8 ? `<button class="linkbtn" data-go="infusing">See all ${upcoming.length} batches</button>` : ''}
     </section>
 
-    ${recent.length ? `<section class="panel">
+    ${recent.length ? `<section class="panel rec">
       <h2>Recently finished</h2>
       ${recent.map(i => `<button class="hrow" data-open-item="${i.id}">
         <span class="hico">${i.type === 'salve' ? ICONS.tin : ICONS.bottle}</span>
@@ -356,10 +359,11 @@ function viewHome() {
       <button class="linkbtn" data-go="inventory">See everything finished</button>
     </section>` : ''}
 
-    ${canEdit('tinctures') ? `<div class="btnrow">
+    ${canEdit('tinctures') ? `<div class="btnrow act">
       <button class="btn" data-act="home-add-tincture">${ICONS.plus}New tincture</button>
       <button class="btn ghost" data-act="home-add-salve">${ICONS.plus}New salve</button>
-    </div>` : ''}`;
+    </div>` : ''}
+    </div>`;
 }
 
 /* ================= Infusing & Salves ================= */
@@ -614,7 +618,7 @@ function viewInventory() {
     .filter(i => (f === 'all' || i.type === f) && (!q || i.name.toLowerCase().includes(q)))
     .filter(i => todo === 'bottle' ? needsBottling(i) : todo === 'label' ? needsLabel(i) : true)
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.name.localeCompare(b.name));
-  const head = `<div class="backbar"><button class="iconbtn" data-go="home" aria-label="Back to home">${ICONS.back}</button></div>` + pageHead(`<span style="color:var(--forest)">${ICONS.shelf}</span>`, 'Finished', 'A record of every batch you\'ve made.', 'add-item');
+  const head = `<div class="backbar phone-only"><button class="iconbtn" data-go="home" aria-label="Back to home">${ICONS.back}</button></div>` + pageHead(`<span style="color:var(--forest)">${ICONS.shelf}</span>`, 'Finished', 'A record of every batch you\'ve made.', 'add-item');
 
   if (!state.inventory.length) {
     return head + emptyState('Nothing finished yet', 'When you strain a tincture or pour a salve it\'s logged here: what you made, how many, and when. You can also add one by hand.', 'add-item', 'Add a finished batch');
@@ -869,7 +873,7 @@ function viewSettings() {
   const toggle = (key, label, sub) => `<div class="row"><div class="label">${label}<small>${sub}</small></div>
     <label class="switch"><input type="checkbox" data-setting="${key}" ${s[key] ? 'checked' : ''} aria-label="${label}"><span></span></label></div>`;
   return `
-    <div class="backbar"><button class="iconbtn" data-go="home" aria-label="Back to home">${ICONS.back}</button></div>
+    <div class="backbar phone-only"><button class="iconbtn" data-go="home" aria-label="Back to home">${ICONS.back}</button></div>
     <header class="page-head"><div class="art" style="color:var(--forest)">${ICONS.gear}</div><div><h1>Settings</h1><p>Reminders and backups.</p></div><span></span></header>
     <div class="rule"></div>
     <section class="group"><h2>Account</h2>
@@ -1541,8 +1545,8 @@ function showWelcome() {
 
 /* ================= Boot ================= */
 
-$$('.tabbar .ti').forEach(el => { el.innerHTML = ICONS[el.dataset.icon]; });
-$$('.tabbar button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
+$$('.ti').forEach(el => { el.innerHTML = ICONS[el.dataset.icon]; });
+$$('.tabbar button, .sidebar [data-tab]').forEach(b => b.addEventListener('click', () => { closeSheet(); go(b.dataset.tab); }));
 
 async function boot() {
   if (sb) {
