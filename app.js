@@ -1,0 +1,1216 @@
+/* Mountain Trails Wellness Studio — Apothecary tracker
+   Data is kept on the device (localStorage) and synced to her private Supabase account,
+   so it still works offline and catches up when the phone is back online. */
+'use strict';
+
+/* ================= Storage ================= */
+
+const STORE_KEY = 'mtws-apothecary-v1';
+
+function defaultState() {
+  return {
+    tinctures: [],
+    salves: [],
+    inventory: [],
+    recipes: [],
+    settings: { notifications: false, shakeReminders: false },
+    shaken: {},            // batch id -> date last shaken
+    lastShakeNotice: null,
+  };
+}
+
+function load() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (saved) {
+      const base = defaultState();
+      return { ...base, ...saved, settings: { ...base.settings, ...saved.settings } };
+    }
+  } catch (e) { /* fall through to a fresh state */ }
+  return defaultState();
+}
+
+let state = load();
+
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+  catch (e) { toast('Could not save on this device. Check that storage is not blocked.'); }
+  scheduleSync();
+}
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+/* ================= Dates ================= */
+
+const pad = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => iso(new Date());
+function parseDate(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
+function addDays(s, n) { const d = parseDate(s); d.setDate(d.getDate() + n); return iso(d); }
+const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
+const fmtDate = s => s ? parseDate(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+function fmtDuration(days) {
+  if (!days) return '—';
+  if (days % 7 === 0) return plural(days / 7, 'week');
+  return plural(days, 'day');
+}
+
+function batchInfo(b) {
+  const total = Math.max(1, daysBetween(b.start, b.ready));
+  const left = daysBetween(today(), b.ready);
+  const pct = Math.min(100, Math.max(0, Math.round((total - left) / total * 100)));
+  const ready = left <= 0;
+  return { total, left, pct, ready };
+}
+
+function leftText(info) {
+  if (info.left < 0) return `Ready ${plural(-info.left, 'day')} ago`;
+  if (info.left === 0) return 'Ready today';
+  return `${plural(info.left, 'day')} left`;
+}
+
+/* ================= Helpers ================= */
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function toast(msg, ms = 3800) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+
+/* ================= Icons & art ================= */
+
+const ICONS = {
+  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20 9 9l3.5 5L16 8l6 12z"/><circle cx="6.5" cy="6" r="2"/></svg>',
+  bottle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4v3h-4z"/><path d="M9 5h6v2.5c2 .8 3 2.3 3 4.2V20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-8.3c0-1.9 1-3.4 3-4.2z"/><path d="M8.5 13h7v5h-7z"/></svg>',
+  tin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="9" rx="9" ry="3.2"/><path d="M3 9v6c0 1.8 4 3.2 9 3.2s9-1.4 9-3.2V9"/><path d="M3 12c0 1.8 4 3.2 9 3.2s9-1.4 9-3.2"/></svg>',
+  shelf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21h20M3 21v-2h18v2"/><path d="M5 19v-7h4v7M10 19v-9h4v9M15 19v-7h4v7"/><path d="M6 12V10.5h2V12M11 10V8.5h2V10M16 12v-1.5h2V12"/></svg>',
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.5-5-2-9-2v14c4 0 7 .5 9 2 2-1.5 5-2 9-2V4c-4 0-7 .5-9 2z"/><path d="M12 6v14"/><path d="M5.5 8.5c1.5 0 3 .3 4 .8M5.5 11.5c1.5 0 3 .3 4 .8M14.5 9.3c1-.5 2.5-.8 4-.8"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>',
+  jar: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 2h10v3H7zM6 6h12l1 3v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V9z"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
+};
+
+function hashHue(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
+const FLOWER_TINTS = ['#D4A258', '#8B3A3A', '#9A7BB5', '#E0B84A', '#C77B5A', '#7C8FB5'];
+
+// Engraved-style botanical sprig used for headers, recipes and empty states.
+function sprigArt(seed = '', w = 64, h = 72) {
+  const tint = FLOWER_TINTS[hashHue(seed) % FLOWER_TINTS.length];
+  return `<svg viewBox="0 0 64 72" width="${w}" height="${h}" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 70C31 52 30 36 33 14" stroke="#2E4B32" stroke-width="1.6"/>
+    <path d="M32 54c-8-2-14-8-16-15 8 1 14 6 16 15z" fill="#9BAE82" stroke="#2E4B32" stroke-width="1.1"/>
+    <path d="M31.5 42c8-2 13-8 15-14-8 1-13 6-15 14z" fill="#9BAE82" stroke="#2E4B32" stroke-width="1.1"/>
+    <path d="M31 30c-6-2-10-6-11-12 6 1 10 5 11 12z" fill="#b6c49f" stroke="#2E4B32" stroke-width="1.1"/>
+    <path d="M27 49l-6-6M37 37l5-5M28 25l-4-4" stroke="#2E4B32" stroke-width=".7"/>
+    <g transform="translate(33 12)">
+      ${[0, 60, 120, 180, 240, 300].map(a => `<ellipse rx="3.2" ry="6.5" cy="-6" transform="rotate(${a})" fill="${tint}" stroke="#3E2F1F" stroke-width=".7"/>`).join('')}
+      <circle r="3.2" fill="#E0B84A" stroke="#3E2F1F" stroke-width=".7"/>
+    </g>
+  </svg>`;
+}
+
+function mountainArt() {
+  return `<svg viewBox="0 0 150 90" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 78 48 30l14 16 20-30 30 40 8-8 20 30" stroke-width="1.6"/>
+    <path d="M74 28l8-12 9 12-5-2-4 4-4-4z" fill="#F7EBD6" stroke-width="1.2"/>
+    <path d="M42 38l6-8 6 7" stroke-width="1"/>
+    <path d="M30 78c3-8 3-14 0-20M30 64c-5-1-8-4-9-8 5 0 8 3 9 8zM30 68c5-1 8-4 9-8-5 0-8 3-9 8z" stroke="#2E4B32" stroke-width="1.2" fill="#9BAE82"/>
+    <path d="M120 78c-3-8-3-14 0-20M120 64c5-1 8-4 9-8-5 0-8 3-9 8zM120 68c-5-1-8-4-9-8 5 0 8 3 9 8z" stroke="#2E4B32" stroke-width="1.2" fill="#9BAE82"/>
+    <path d="M4 82h142" stroke-width="1"/>
+  </svg>`;
+}
+
+// Amber dropper bottle with a parchment label; liquid level follows progress.
+function bottleArt(pct = 100, label = '') {
+  const top = 30 + (1 - pct / 100) * 28;
+  const id = 'b' + Math.random().toString(36).slice(2, 7);
+  return `<svg viewBox="0 0 48 80">
+    <defs><clipPath id="${id}"><path d="M14 22h20v4c5 2 8 6 8 11v34a5 5 0 0 1-5 5H11a5 5 0 0 1-5-5V37c0-5 3-9 8-11z"/></clipPath></defs>
+    <rect x="18" y="2" width="12" height="13" rx="5" fill="#2a2018"/>
+    <rect x="16" y="14" width="16" height="8" rx="1" fill="#3E2F1F"/>
+    <path d="M14 22h20v4c5 2 8 6 8 11v34a5 5 0 0 1-5 5H11a5 5 0 0 1-5-5V37c0-5 3-9 8-11z" fill="#c98f4a" opacity=".45"/>
+    <rect x="0" y="${top}" width="48" height="80" fill="#7a3f12" clip-path="url(#${id})"/>
+    <path d="M14 22h20v4c5 2 8 6 8 11v34a5 5 0 0 1-5 5H11a5 5 0 0 1-5-5V37c0-5 3-9 8-11z" fill="none" stroke="#3E2F1F" stroke-width="1.2"/>
+    <rect x="10" y="44" width="28" height="18" rx="1.5" fill="#F7EBD6" stroke="#3E2F1F" stroke-width=".8"/>
+    <path d="M13 50h22M13 55h16" stroke="#6B5844" stroke-width=".9"/>
+    <path d="M10 34c1-3 2-5 4-6" stroke="#fff" stroke-opacity=".45" stroke-width="2" fill="none"/>
+    ${label ? `<title>${esc(label)}</title>` : ''}
+  </svg>`;
+}
+
+function tinArt() {
+  return `<svg viewBox="0 0 64 56">
+    <ellipse cx="32" cy="40" rx="26" ry="9" fill="#8e8a82" stroke="#3E2F1F" stroke-width="1"/>
+    <rect x="6" y="28" width="52" height="12" fill="#b9b4a9"/>
+    <path d="M6 28v12M58 28v12" stroke="#3E2F1F" stroke-width="1"/>
+    <ellipse cx="32" cy="28" rx="26" ry="9" fill="#d8d3c8" stroke="#3E2F1F" stroke-width="1"/>
+    <ellipse cx="32" cy="28" rx="21" ry="6.5" fill="#E2B85E" stroke="#a37a2c" stroke-width=".8"/>
+    <path d="M20 26c5-2 12-2 18 0" stroke="#f6dc9a" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+    <path d="M14 10c3 6 5 10 10 13M18 6c2 5 2 9 1 13" stroke="#2E4B32" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+    <path d="M14 10c-4 0-6 3-6 5 3 0 6-1 6-5zM18 6c3-2 6-1 7 1-3 1-5 1-7-1z" fill="#9BAE82" stroke="#2E4B32" stroke-width=".8"/>
+    <circle cx="44" cy="12" r="4" fill="#E0B84A" stroke="#3E2F1F" stroke-width=".7"/>
+    <path d="M44 16c0 4-2 7-6 10" stroke="#2E4B32" stroke-width="1" fill="none"/>
+  </svg>`;
+}
+
+function inventoryArt(type) {
+  return type === 'salve' ? tinArt() : type === 'tincture' ? bottleArt(70) : sprigArt('other');
+}
+
+/* ================= Navigation ================= */
+
+const ui = {
+  tab: 'home',
+  filters: { infusing: 'all', salves: 'all', inventory: 'all', recipes: 'all' },
+  search: { inventory: '', recipes: '' },
+  recipeId: null,
+  recipeTab: 'details',
+};
+
+function go(tab) {
+  ui.tab = tab;
+  ui.recipeId = null;
+  render();
+  window.scrollTo(0, 0);
+}
+
+function render() {
+  $$('.tabbar button').forEach(b => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
+  const v = $('#view');
+  if (ui.tab === 'home') v.innerHTML = viewHome();
+  else if (ui.tab === 'infusing') v.innerHTML = viewBatches('tincture');
+  else if (ui.tab === 'salves') v.innerHTML = viewBatches('salve');
+  else if (ui.tab === 'inventory') v.innerHTML = viewInventory();
+  else if (ui.tab === 'recipes') v.innerHTML = ui.recipeId ? viewRecipe() : viewRecipes();
+  else v.innerHTML = viewSettings();
+  bindView();
+}
+
+function pageHead(art, title, sub, addAction) {
+  return `<header class="page-head">
+    <div class="art">${art}</div>
+    <div><h1>${title}</h1><p>${sub}</p></div>
+    ${addAction ? `<button class="fab" data-act="${addAction}" aria-label="Add">${ICONS.plus}</button>` : '<span></span>'}
+  </header><div class="rule"></div>`;
+}
+
+function chips(group, options) {
+  return `<div class="chips" role="group">${options.map(([val, label]) =>
+    `<button class="chip" data-filter="${group}" data-val="${val}" aria-pressed="${ui.filters[group] === val}">${label}</button>`).join('')}</div>`;
+}
+
+function emptyState(title, text, act, btn) {
+  return `<div class="empty">${sprigArt(title, 70, 70)}<h3>${title}</h3><p>${text}</p>
+    ${act ? `<button class="btn" data-act="${act}">${ICONS.plus}${btn}</button>` : ''}</div>`;
+}
+
+/* ================= Home ================= */
+
+function allBatches() {
+  return [
+    ...state.tinctures.map(b => ({ b, kind: 'tincture' })),
+    ...state.salves.map(b => ({ b, kind: 'salve' })),
+  ].map(x => ({ ...x, info: batchInfo(x.b) })).sort((a, z) => a.b.ready.localeCompare(z.b.ready));
+}
+
+function whenText(left) {
+  if (left === 1) return 'Tomorrow';
+  if (left < 7) return `In ${left} days`;
+  if (left % 7 === 0) return `In ${plural(left / 7, 'week')}`;
+  return `In ${left} days`;
+}
+
+function viewHome() {
+  const now = new Date();
+  const h = now.getHours();
+  const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  const dateText = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  const batches = allBatches();
+  const ready = batches.filter(x => x.info.ready);
+  const upcoming = batches.filter(x => !x.info.ready);
+  const infusingCount = state.tinctures.filter(b => !batchInfo(b).ready).length;
+  const month = today().slice(0, 7);
+  const finishedMonth = state.inventory.filter(i => (i.date || '').startsWith(month)).length;
+  const shakeNeed = state.settings.shakeReminders
+    ? state.tinctures.filter(b => !batchInfo(b).ready && state.shaken[b.id] !== today()).length : 0;
+
+  const tile = (n, label, tab, filter) =>
+    `<button class="tile" data-go="${tab}" ${filter ? `data-go-filter="${filter}"` : ''}><b>${n}</b><span>${label}</span></button>`;
+
+  // Needs attention: things she can act on today.
+  const attention = [
+    ...ready.map(x => `<button class="hrow" data-open-batch="${x.b.id}" data-kind="${x.kind}">
+        <span class="hico ready">${ICONS.jar}</span>
+        <span><b>${esc(x.b.name)}</b><small>${x.kind === 'tincture' ? 'Ready to strain' : 'Oil ready, time to make'} · ${leftText(x.info)}</small></span>
+        <span class="chev">${ICONS.chev}</span></button>`),
+    shakeNeed ? `<button class="hrow" data-go="infusing">
+        <span class="hico">${ICONS.bottle}</span>
+        <span><b>Shake ${plural(shakeNeed, 'jar')}</b><small>Daily shake</small></span>
+        <span class="chev">${ICONS.chev}</span></button>` : '',
+  ].join('');
+
+  // Coming up: upcoming batches grouped by ready date.
+  const groups = [];
+  for (const x of upcoming) {
+    const g = groups[groups.length - 1];
+    if (g && g.date === x.b.ready) g.items.push(x); else groups.push({ date: x.b.ready, left: x.info.left, items: [x] });
+  }
+  const timeline = groups.slice(0, 8).map(g => {
+    const d = parseDate(g.date);
+    return `<li class="tl">
+      <div class="tl-date"><b>${d.getDate()}</b><span>${d.toLocaleDateString(undefined, { month: 'short' })}</span></div>
+      <div class="tl-body">
+        <div class="tl-when">${whenText(g.left)} · ${d.toLocaleDateString(undefined, { weekday: 'long' })}</div>
+        <div class="tl-items">${g.items.map(x => `<button class="pill" data-open-batch="${x.b.id}" data-kind="${x.kind}">
+          ${x.kind === 'salve' ? ICONS.tin : ICONS.bottle}${esc(x.b.name)}</button>`).join('')}</div>
+      </div></li>`;
+  }).join('');
+
+  const recent = [...state.inventory].sort((a, z) => (z.date || '').localeCompare(a.date || '')).slice(0, 3);
+
+  return `
+    <header class="home-head">
+      <button class="iconbtn gear" data-go="settings" aria-label="Settings">${ICONS.gear}</button>
+      <img class="home-logo" src="icons/logo.png" alt="Mountain Trails Wellness Studio">
+      <p class="greet">${greet} · ${dateText}</p>
+    </header>
+    <div class="rule"></div>
+
+    <div class="tiles">
+      ${tile(infusingCount, 'Infusing', 'infusing', 'infusing')}
+      ${tile(ready.length, 'Ready', ready.length && !ready.some(x => x.kind === 'tincture') ? 'salves' : 'infusing', 'ready')}
+      ${tile(state.salves.length, 'Salves', 'salves')}
+      ${tile(finishedMonth, 'Made this month', 'inventory')}
+    </div>
+
+    <section class="panel">
+      <h2>Needs attention</h2>
+      ${attention || `<p class="caught">${ICONS.jar}<span>All caught up. Nothing to strain today.</span></p>`}
+    </section>
+
+    <section class="panel">
+      <h2>Coming up</h2>
+      ${timeline ? `<ol class="timeline">${timeline}</ol>` : '<p class="caught"><span>Nothing infusing right now.</span></p>'}
+      ${groups.length > 8 ? `<button class="linkbtn" data-go="infusing">See all ${upcoming.length} batches</button>` : ''}
+    </section>
+
+    ${recent.length ? `<section class="panel">
+      <h2>Recently finished</h2>
+      ${recent.map(i => `<button class="hrow" data-open-item="${i.id}">
+        <span class="hico">${i.type === 'salve' ? ICONS.tin : ICONS.bottle}</span>
+        <span><b>${esc(i.name)}</b><small>${fmtDate(i.date)}${i.qty != null ? ` · ${i.qty} made` : ''}</small></span>
+        <span class="chev">${ICONS.chev}</span></button>`).join('')}
+      <button class="linkbtn" data-go="inventory">See everything finished</button>
+    </section>` : ''}
+
+    <div class="btnrow">
+      <button class="btn" data-act="home-add-tincture">${ICONS.plus}New tincture</button>
+      <button class="btn ghost" data-act="home-add-salve">${ICONS.plus}New salve</button>
+    </div>`;
+}
+
+/* ================= Infusing & Salves ================= */
+
+const KIND = {
+  tincture: { list: 'tinctures', filterKey: 'infusing', liquid: 'Menstruum', liquidHint: 'e.g. 80 proof vodka', infusingLabel: 'Infusing', readyLabel: 'Ready to strain', finishBtn: 'Strain & bottle', started: 'Started' },
+  salve: { list: 'salves', filterKey: 'salves', liquid: 'Carrier oil', liquidHint: 'e.g. olive oil', infusingLabel: 'Infusing Oil', readyLabel: 'Ready to make', finishBtn: 'Make salve', started: 'Oil started' },
+};
+
+function sortedBatches(kind) {
+  return [...state[KIND[kind].list]].sort((a, b) => a.ready.localeCompare(b.ready));
+}
+
+function viewBatches(kind) {
+  const k = KIND[kind];
+  const all = sortedBatches(kind);
+  const readyCount = all.filter(b => batchInfo(b).ready).length;
+  const f = ui.filters[k.filterKey];
+  const shown = all.filter(b => f === 'all' || (f === 'ready') === batchInfo(b).ready);
+
+  const head = kind === 'tincture'
+    ? pageHead(sprigArt('lavender', 56, 56), 'Infusing', 'Track your tinctures and never miss a harvest.', 'add-batch')
+    : pageHead(sprigArt('calendula', 56, 56), 'Salves', 'Track your salve batches from start to finish.', 'add-batch');
+
+  if (!all.length) {
+    return head + (kind === 'tincture'
+      ? emptyState('No jars infusing yet', 'Add a tincture when you set a jar on the shelf. You\'ll see a countdown, and a reminder a week before it\'s ready.', 'add-batch', 'Start a tincture')
+      : emptyState('No salves in progress', 'Start a batch when you set your herbs infusing in oil. When the oil is ready, make the salve and it moves to Finished.', 'add-batch', 'Start a salve'));
+  }
+
+  let shakeNote = '';
+  if (kind === 'tincture' && state.settings.shakeReminders) {
+    const need = all.filter(b => !batchInfo(b).ready && state.shaken[b.id] !== today()).length;
+    if (need) shakeNote = `<div class="notice">${ICONS.jar}<span>${plural(need, 'jar')} still need a shake today.</span></div>`;
+  }
+
+  const cards = shown.map(b => batchCard(kind, b)).join('') ||
+    `<p class="fineprint">Nothing here right now.</p>`;
+
+  return head +
+    chips(k.filterKey, [['all', `All (${all.length})`], ['infusing', `${k.infusingLabel} (${all.length - readyCount})`], ['ready', `Ready (${readyCount})`]]) +
+    shakeNote + `<div class="list">${cards}</div>`;
+}
+
+function batchCard(kind, b) {
+  const k = KIND[kind];
+  const info = batchInfo(b);
+  const barCls = info.ready ? 'ready' : '';
+  let badge = '';
+  if (info.ready) badge = `<span class="badge ready">${ICONS.jar}${k.readyLabel}</span>`;
+
+  let shake = '';
+  if (kind === 'tincture' && state.settings.shakeReminders && !info.ready) {
+    const done = state.shaken[b.id] === today();
+    shake = `<span class="badge shake ${done ? 'done' : ''}" role="button" tabindex="0" data-shake="${b.id}">${done ? '✓ Shaken today' : 'Tap when shaken'}</span>`;
+  }
+
+  return `<button class="card" data-open-batch="${b.id}" data-kind="${kind}">
+    <div class="thumb">${kind === 'tincture' ? bottleArt(info.pct) : tinArt()}</div>
+    <div>
+      <h3>${esc(b.name)}</h3>
+      <p class="meta">${k.started} ${fmtDate(b.start)}<br>Ready ${fmtDate(b.ready)}</p>
+      <div class="progress"><div class="bar ${barCls}"><i style="width:${info.pct}%"></i></div><span class="pct">${info.pct}%</span></div>
+      <div class="left">${leftText(info)}</div>
+    </div>
+    <span class="chev">${ICONS.chev}</span>
+    ${badge || shake ? `<div class="wide">${badge} ${shake}</div>` : ''}
+  </button>`;
+}
+
+function findBatch(kind, id) { return state[KIND[kind].list].find(b => b.id === id); }
+
+function batchForm(kind, existing, presetRecipeId) {
+  const k = KIND[kind];
+  const recipes = state.recipes.filter(r => r.type === kind);
+  const b = existing || { name: '', liquid: '', start: today(), notes: '', recipeId: presetRecipeId || '' };
+  let days = existing ? daysBetween(existing.start, existing.ready) : 42;
+  if (!existing && presetRecipeId) {
+    const r = state.recipes.find(x => x.id === presetRecipeId);
+    if (r) { b.name = r.name; if (r.infuseDays) days = r.infuseDays; }
+  }
+  const useWeeks = days % 7 === 0;
+
+  openSheet(`
+    <div class="sheet-head"><h2>${existing ? 'Edit' : 'New'} ${kind === 'tincture' ? 'tincture' : 'salve batch'}</h2>
+      <button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
+    <form id="bf">
+      ${recipes.length ? `<label class="field"><span>From recipe (optional)</span>
+        <select name="recipeId"><option value="">— None —</option>
+        ${recipes.map(r => `<option value="${r.id}" ${r.id === b.recipeId ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>` : ''}
+      <label class="field"><span>Name</span><input name="name" required value="${esc(b.name)}" placeholder="${kind === 'tincture' ? 'e.g. Elderberry' : 'e.g. Calendula Salve'}"></label>
+      <label class="field"><span>${k.liquid}</span><input name="liquid" value="${esc(b.liquid)}" placeholder="${k.liquidHint}"></label>
+      <label class="field"><span>${kind === 'tincture' ? 'Start date' : 'Oil start date'}</span><input type="date" name="start" required value="${b.start}"></label>
+      <div class="field"><span>${kind === 'tincture' ? 'Infuse for' : 'Oil infuses for'}</span>
+        <div class="two"><input type="number" name="amount" min="1" max="730" required value="${useWeeks ? days / 7 : days}" inputmode="numeric">
+          <select name="unit"><option value="7" ${useWeeks ? 'selected' : ''}>weeks</option><option value="1" ${useWeeks ? '' : 'selected'}>days</option></select></div></div>
+      <div class="calc" id="calc"></div>
+      <label class="field"><span>Notes</span><textarea name="notes" placeholder="Herb weight, ratio, where the jar is…">${esc(b.notes)}</textarea></label>
+      <button class="btn block" type="submit">${existing ? 'Save changes' : (kind === 'tincture' ? 'Start infusing' : 'Start batch')}</button>
+    </form>`, sheet => {
+    const form = $('#bf', sheet);
+    const calc = () => {
+      const n = Number(form.amount.value) * Number(form.unit.value);
+      $('#calc', sheet).textContent = form.start.value && n > 0 ? `Ready on ${fmtDate(addDays(form.start.value, n))}` : '';
+    };
+    form.addEventListener('input', calc);
+    form.recipeId?.addEventListener('change', () => {
+      const r = state.recipes.find(x => x.id === form.recipeId.value);
+      if (!r) return;
+      form.name.value = r.name;
+      if (r.infuseDays) {
+        const w = r.infuseDays % 7 === 0;
+        form.amount.value = w ? r.infuseDays / 7 : r.infuseDays;
+        form.unit.value = w ? '7' : '1';
+      }
+      calc();
+    });
+    calc();
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const n = Number(form.amount.value) * Number(form.unit.value);
+      const data = {
+        name: form.name.value.trim(),
+        liquid: form.liquid.value.trim(),
+        start: form.start.value,
+        ready: addDays(form.start.value, n),
+        notes: form.notes.value.trim(),
+        recipeId: form.recipeId ? form.recipeId.value : '',
+      };
+      if (existing) {
+        if (existing.ready !== data.ready) existing.notifiedReady = false;
+        Object.assign(existing, data);
+      } else {
+        state[k.list].push({ id: uid(), ...data, notifiedReady: false });
+      }
+      save(); closeSheet(); render(); checkReminders();
+      toast(existing ? 'Saved' : `${data.name} is ${kind === 'tincture' ? 'infusing' : 'started'} — ready ${fmtDate(data.ready)}`);
+    });
+  });
+}
+
+function batchDetail(kind, id) {
+  const k = KIND[kind];
+  const b = findBatch(kind, id);
+  if (!b) return;
+  const info = batchInfo(b);
+  const recipe = state.recipes.find(r => r.id === b.recipeId);
+  openSheet(`
+    <div class="sheet-head"><h2>${esc(b.name)}</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
+    <div class="detail-bottle">
+      ${kind === 'tincture' ? bottleArt(info.pct) : tinArt()}
+      <div>
+        <div class="big-left">${leftText(info)}</div>
+        <div class="progress"><div class="bar ${info.ready ? 'ready' : ''}"><i style="width:${info.pct}%"></i></div><span class="pct">${info.pct}%</span></div>
+        ${info.ready ? `<span class="badge ready">${ICONS.jar}${k.readyLabel}</span>` : ''}
+      </div>
+    </div>
+    <dl class="kv">
+      <dt>${k.started}</dt><dd>${fmtDate(b.start)}</dd>
+      <dt>Ready</dt><dd>${fmtDate(b.ready)}</dd>
+      <dt>Steep time</dt><dd>${fmtDuration(info.total)}</dd>
+      ${b.liquid ? `<dt>${k.liquid}</dt><dd>${esc(b.liquid)}</dd>` : ''}
+      ${recipe ? `<dt>Recipe</dt><dd>${esc(recipe.name)}</dd>` : ''}
+    </dl>
+    ${b.notes ? `<div class="note-box">${esc(b.notes)}</div>` : ''}
+    <button class="btn block ${info.ready ? '' : 'ghost'}" data-finish style="margin-top:14px">${ICONS.jar}${k.finishBtn}</button>
+    <div class="btnrow">
+      <button class="btn ghost" data-edit>Edit</button>
+      <button class="btn danger" data-delete>Delete</button>
+    </div>`, sheet => {
+    $('[data-edit]', sheet).onclick = () => batchForm(kind, b);
+    $('[data-finish]', sheet).onclick = () => finishForm(kind, b);
+    $('[data-delete]', sheet).onclick = () => {
+      if (!confirm(`Delete "${b.name}"? This can't be undone.`)) return;
+      state[k.list] = state[k.list].filter(x => x.id !== b.id);
+      delete state.shaken[b.id];
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+// Strain a tincture / pour a salve: the batch leaves the tracker and is logged as finished.
+function finishForm(kind, b) {
+  const isT = kind === 'tincture';
+  openSheet(`
+    <div class="sheet-head"><h2>${isT ? 'Strain & bottle' : 'Make salve'}</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
+    <p class="fineprint" style="text-align:left;margin:0 0 12px">This moves <b>${esc(b.name)}</b> to Finished.</p>
+    <form id="ff">
+      <label class="field"><span>Name</span><input name="name" required value="${esc(b.name)}"></label>
+      <div class="two">
+        <label class="field"><span>How many made</span><input type="number" name="qty" min="0" inputmode="numeric" placeholder="e.g. 32"></label>
+        <label class="field"><span>Size</span><input name="size" placeholder="${isT ? 'e.g. 2 oz bottles' : 'e.g. 2 oz tins'}"></label>
+      </div>
+      <label class="field"><span>${isT ? 'Bottled on' : 'Poured on'}</span><input type="date" name="date" required value="${today()}"></label>
+      <button class="btn block" type="submit">Mark as finished</button>
+    </form>`, sheet => {
+    $('#ff', sheet).addEventListener('submit', e => {
+      e.preventDefault();
+      const f = e.target;
+      state.inventory.push({
+        id: uid(), type: kind, name: f.name.value.trim(), size: f.size.value.trim(),
+        qty: f.qty.value === '' ? null : Math.max(0, Number(f.qty.value)), date: f.date.value,
+        started: b.start, notes: b.notes || '',
+      });
+      const list = KIND[kind].list;
+      state[list] = state[list].filter(x => x.id !== b.id);
+      delete state.shaken[b.id];
+      save(); closeSheet(); render();
+      toast(`${f.name.value.trim()} moved to Finished`);
+    });
+  });
+}
+
+/* ================= Finished ================= */
+
+const TYPE_LABEL = { tincture: 'Tincture', salve: 'Salve', other: 'Other' };
+
+function viewInventory() {
+  const q = ui.search.inventory.toLowerCase();
+  const f = ui.filters.inventory;
+  const items = state.inventory
+    .filter(i => (f === 'all' || i.type === f) && (!q || i.name.toLowerCase().includes(q)))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.name.localeCompare(b.name));
+  const head = pageHead(`<span style="color:var(--forest)">${ICONS.shelf}</span>`, 'Finished', 'A record of every batch you\'ve made.', 'add-item');
+
+  if (!state.inventory.length) {
+    return head + emptyState('Nothing finished yet', 'When you strain a tincture or pour a salve it\'s logged here: what you made, how many, and when. You can also add one by hand.', 'add-item', 'Add a finished batch');
+  }
+  return head + `
+    <div class="searchrow">
+      <label class="search">${ICONS.search}<input type="search" id="inv-q" placeholder="Search finished…" value="${esc(ui.search.inventory)}" aria-label="Search finished batches"></label>
+      <select id="inv-type" aria-label="Type">
+        ${[['all', 'All Types'], ['tincture', 'Tinctures'], ['salve', 'Salves'], ['other', 'Other']].map(([v, l]) => `<option value="${v}" ${f === v ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="list">${items.map(i => `
+      <button class="card" data-open-item="${i.id}">
+        <div class="thumb">${inventoryArt(i.type)}</div>
+        <div><h3>${esc(i.name)}</h3>
+          <p class="meta">${i.type === 'salve' ? 'Poured' : 'Finished'} ${fmtDate(i.date)}${i.started ? `<br>Started ${fmtDate(i.started)}` : ''}</p>
+          ${i.size ? `<span class="tag">${esc(i.size)}</span>` : ''}</div>
+        ${i.qty != null ? `<div class="made"><b>${i.qty}</b><small>made</small></div>` : `<span class="chev">${ICONS.chev}</span>`}
+      </button>`).join('') || '<p class="fineprint">No matches.</p>'}</div>`;
+}
+
+function itemForm(existing) {
+  const i = existing || { name: '', type: 'tincture', size: '', qty: null, date: today(), started: '', notes: '' };
+  openSheet(`
+    <div class="sheet-head"><h2>${existing ? 'Edit finished batch' : 'Add finished batch'}</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
+    <form id="if">
+      <label class="field"><span>Name</span><input name="name" required value="${esc(i.name)}"></label>
+      <div class="two">
+        <label class="field"><span>Type</span><select name="type">${Object.entries(TYPE_LABEL).map(([v, l]) => `<option value="${v}" ${i.type === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field"><span>How many made</span><input type="number" name="qty" min="0" value="${i.qty ?? ''}" inputmode="numeric" placeholder="Optional"></label>
+      </div>
+      <label class="field"><span>Size</span><input name="size" value="${esc(i.size)}" placeholder="e.g. 2 oz bottles"></label>
+      <div class="two">
+        <label class="field"><span>Started</span><input type="date" name="started" value="${i.started || ''}"></label>
+        <label class="field"><span>Finished</span><input type="date" name="date" required value="${i.date}"></label>
+      </div>
+      <label class="field"><span>Notes</span><textarea name="notes">${esc(i.notes)}</textarea></label>
+      <button class="btn block" type="submit">${existing ? 'Save changes' : 'Add to Finished'}</button>
+      ${existing ? '<button class="btn danger block" type="button" data-delete style="margin-top:10px">Delete</button>' : ''}
+    </form>`, sheet => {
+    const form = $('#if', sheet);
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const data = {
+        name: form.name.value.trim(), type: form.type.value,
+        qty: form.qty.value === '' ? null : Math.max(0, Number(form.qty.value)),
+        size: form.size.value.trim(), started: form.started.value, date: form.date.value, notes: form.notes.value.trim(),
+      };
+      if (existing) Object.assign(existing, data); else state.inventory.push({ id: uid(), ...data });
+      save(); closeSheet(); render();
+    });
+    const del = $('[data-delete]', sheet);
+    if (del) del.onclick = () => {
+      if (!confirm(`Delete "${i.name}" from Finished?`)) return;
+      state.inventory = state.inventory.filter(x => x.id !== i.id);
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+/* ================= Recipes ================= */
+
+function viewRecipes() {
+  const q = ui.search.recipes.toLowerCase();
+  const f = ui.filters.recipes;
+  const head = pageHead(`<span style="color:var(--forest)">${ICONS.book}</span>`, 'Recipes', 'Your collection of herbal recipes.', 'add-recipe');
+  if (!state.recipes.length) {
+    return head + emptyState('Your recipe book is blank', 'Write down your formulas: ingredients, ratios, steps and steep times. Then start a batch straight from a recipe.', 'add-recipe', 'Add a recipe');
+  }
+  const items = state.recipes
+    .filter(r => (f === 'all' || r.type === f) && (!q || [r.name, r.description, ...r.ingredients.map(i => i.name)].join(' ').toLowerCase().includes(q)))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return head + `
+    <div class="searchrow"><label class="search">${ICONS.search}<input type="search" id="rec-q" placeholder="Search recipes or herbs…" value="${esc(ui.search.recipes)}" aria-label="Search recipes"></label></div>
+    ${chips('recipes', [['all', 'All'], ['tincture', 'Tinctures'], ['salve', 'Salves'], ['other', 'Other']])}
+    <div class="list">${items.map(r => `
+      <button class="card" data-open-recipe="${r.id}">
+        <div class="thumb">${r.photo ? `<img class="photo" src="${r.photo}" alt="">` : sprigArt(r.name)}</div>
+        <div><h3>${esc(r.name)}</h3><span class="tag">${TYPE_LABEL[r.type]}</span>
+          <p class="meta">${esc(r.description || r.ingredients.map(i => i.name).filter(Boolean).join(', '))}</p></div>
+        <span class="chev">${ICONS.chev}</span>
+      </button>`).join('') || '<p class="fineprint">No matches.</p>'}</div>`;
+}
+
+function viewRecipe() {
+  const r = state.recipes.find(x => x.id === ui.recipeId);
+  if (!r) { ui.recipeId = null; return viewRecipes(); }
+  const t = ui.recipeTab;
+  const canBatch = r.type === 'tincture' || r.type === 'salve';
+  let body = '';
+  if (t === 'details') {
+    body = `<div class="facts">
+        <div class="fact">${ICONS.clock}<div><small>${r.type === 'salve' ? 'Oil infuse time' : 'Infuse time'}</small><b>${esc(r.infuseText || fmtDuration(r.infuseDays))}</b></div></div>
+        <div class="fact">${ICONS.bottle}<div><small>Yield</small><b>${esc(r.yield || '—')}</b></div></div>
+      </div>
+      ${r.steps.length ? `<h2 class="section-h">Steps</h2><ol class="steps">${r.steps.map(s => `<li><span>${esc(s)}</span></li>`).join('')}</ol>` : ''}`;
+  } else if (t === 'ingredients') {
+    body = r.ingredients.length
+      ? `<h2 class="section-h">Ingredients &amp; Ratios</h2><ul class="ing">${r.ingredients.map(i => `<li><span>${esc(i.name)}</span><span>${esc(i.amount)}</span></li>`).join('')}</ul>`
+      : '<p class="fineprint">No ingredients listed yet.</p>';
+  } else {
+    body = r.notes ? `<div class="note-box">${esc(r.notes)}</div>` : '<p class="fineprint">No notes yet.</p>';
+  }
+  return `
+    <div class="backbar"><button class="iconbtn" data-act="recipe-back" aria-label="Back to recipes">${ICONS.back}</button>
+      <button class="btn ghost" data-act="edit-recipe" style="min-height:40px">Edit</button></div>
+    <div class="recipe-hero">${r.photo ? `<img class="hero-photo" src="${r.photo}" alt="">` : mountainArt()}
+      <h1>${esc(r.name)}</h1><div class="kind">${TYPE_LABEL[r.type]}</div>
+      ${r.description ? `<p class="desc">${esc(r.description)}</p>` : ''}</div>
+    <div class="seg">${[['details', 'Details'], ['ingredients', 'Ingredients'], ['notes', 'Notes']].map(([v, l]) =>
+      `<button data-rtab="${v}" aria-pressed="${t === v}">${l}</button>`).join('')}</div>
+    ${body}
+    ${canBatch ? `<button class="btn block" data-act="batch-from-recipe">${ICONS.plus}Start a ${r.type === 'salve' ? 'salve batch' : 'tincture'} from this recipe</button>` : ''}`;
+}
+
+// Center-crops a picture to a small square JPEG so many recipes fit in phone storage.
+function squarePhoto(file, size = 360) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(img.naturalWidth, img.naturalHeight);
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      c.getContext('2d').drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+    img.src = url;
+  });
+}
+
+function recipeForm(existing) {
+  const r = existing || { name: '', type: 'tincture', description: '', infuseDays: 42, infuseText: '', yield: '', ingredients: [{ name: '', amount: '' }], steps: [], notes: '' };
+  const days = r.infuseDays || 0;
+  const useWeeks = days % 7 === 0;
+  const ingRow = (i = { name: '', amount: '' }) => `<div class="ingrow"><input placeholder="Herb or ingredient" value="${esc(i.name)}" data-ing="name"><input placeholder="1 part" value="${esc(i.amount)}" data-ing="amount"><button type="button" class="iconbtn" data-rm aria-label="Remove">${ICONS.close}</button></div>`;
+  openSheet(`
+    <div class="sheet-head"><h2>${existing ? 'Edit recipe' : 'New recipe'}</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
+    <form id="rf">
+      <label class="field"><span>Name</span><input name="name" required value="${esc(r.name)}" placeholder="e.g. Immune Support Tincture"></label>
+      <div class="field"><span>Photo (optional)</span>
+        <div class="photo-pick">
+          <div class="photo-prev" id="photo-prev">${r.photo ? `<img src="${r.photo}" alt="">` : sprigArt(r.name || 'new', 48, 54)}</div>
+          <div class="photo-btns">
+            <label class="btn ghost">${r.photo ? 'Change photo' : 'Add photo'}<input type="file" accept="image/*" id="photo-in" hidden></label>
+            <button type="button" class="btn danger" id="photo-rm" ${r.photo ? '' : 'hidden'}>Remove</button>
+          </div>
+        </div></div>
+      <label class="field"><span>Type</span><select name="type">${Object.entries(TYPE_LABEL).map(([v, l]) => `<option value="${v}" ${r.type === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="field"><span>Short description</span><input name="description" value="${esc(r.description)}" placeholder="What it's for"></label>
+      <div class="field"><span>Infuse time</span>
+        <div class="two"><input type="number" name="amount" min="0" value="${days ? (useWeeks ? days / 7 : days) : ''}" inputmode="numeric">
+        <select name="unit"><option value="7" ${useWeeks ? 'selected' : ''}>weeks</option><option value="1" ${useWeeks ? '' : 'selected'}>days</option></select></div>
+        <small>Used as the default countdown when you start a batch.</small></div>
+      <label class="field"><span>Infuse time as written (optional)</span><input name="infuseText" value="${esc(r.infuseText)}" placeholder="e.g. 4–6 weeks"></label>
+      <label class="field"><span>Yield</span><input name="yield" value="${esc(r.yield)}" placeholder="e.g. ~2 (60 ml) bottles"></label>
+      <div class="field"><span>Ingredients &amp; ratios</span><div id="ings">${(r.ingredients.length ? r.ingredients : [{ name: '', amount: '' }]).map(ingRow).join('')}</div>
+        <button type="button" class="btn ghost" data-add-ing>${ICONS.plus}Add ingredient</button></div>
+      <label class="field"><span>Steps</span><textarea name="steps" rows="5" placeholder="One step per line">${esc(r.steps.join('\n'))}</textarea></label>
+      <label class="field"><span>Notes</span><textarea name="notes" placeholder="Dosage, cautions, sourcing, label text…">${esc(r.notes)}</textarea></label>
+      <button class="btn block" type="submit">${existing ? 'Save recipe' : 'Add recipe'}</button>
+      ${existing ? '<button class="btn danger block" type="button" data-delete style="margin-top:10px">Delete recipe</button>' : ''}
+    </form>`, sheet => {
+    const form = $('#rf', sheet);
+    const ings = $('#ings', sheet);
+    $('[data-add-ing]', sheet).onclick = () => { ings.insertAdjacentHTML('beforeend', ingRow()); ings.lastElementChild.querySelector('input').focus(); };
+    ings.addEventListener('click', e => { const rm = e.target.closest('[data-rm]'); if (rm) rm.parentElement.remove(); });
+    let photo = r.photo || '';
+    const showPhoto = () => {
+      $('#photo-prev', sheet).innerHTML = photo ? `<img src="${photo}" alt="">` : sprigArt(form.name.value || 'new', 48, 54);
+      $('#photo-rm', sheet).hidden = !photo;
+      $('#photo-in', sheet).parentElement.firstChild.textContent = photo ? 'Change photo' : 'Add photo';
+    };
+    $('#photo-in', sheet).onchange = async e => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      try { photo = await squarePhoto(file); showPhoto(); }
+      catch (err) { toast('Couldn\'t open that picture. Try a different one.'); }
+    };
+    $('#photo-rm', sheet).onclick = () => { photo = ''; showPhoto(); };
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const data = {
+        name: form.name.value.trim(),
+        type: form.type.value,
+        description: form.description.value.trim(),
+        infuseDays: (Number(form.amount.value) || 0) * Number(form.unit.value),
+        infuseText: form.infuseText.value.trim(),
+        yield: form.yield.value.trim(),
+        ingredients: $$('.ingrow', ings).map(row => ({ name: $('[data-ing=name]', row).value.trim(), amount: $('[data-ing=amount]', row).value.trim() })).filter(i => i.name),
+        steps: form.steps.value.split('\n').map(s => s.trim()).filter(Boolean),
+        notes: form.notes.value.trim(),
+        photo,
+      };
+      if (existing) Object.assign(existing, data);
+      else { const id = uid(); state.recipes.push({ id, ...data }); ui.recipeId = id; ui.recipeTab = 'details'; }
+      save(); closeSheet(); render();
+    });
+    const del = $('[data-delete]', sheet);
+    if (del) del.onclick = () => {
+      if (!confirm(`Delete the recipe "${r.name}"?`)) return;
+      state.recipes = state.recipes.filter(x => x.id !== r.id);
+      ui.recipeId = null;
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+/* ================= Settings ================= */
+
+function viewSettings() {
+  const s = state.settings;
+  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const permNote = perm === 'unsupported'
+    ? 'This browser can\'t show notifications. On iPhone, add the app to your Home Screen first (Share → Add to Home Screen).'
+    : perm === 'denied' ? 'Notifications are blocked for this app in your phone\'s settings.'
+    : 'Alerts pop up when you open the app and a batch is ready.';
+  const toggle = (key, label, sub) => `<div class="row"><div class="label">${label}<small>${sub}</small></div>
+    <label class="switch"><input type="checkbox" data-setting="${key}" ${s[key] ? 'checked' : ''} aria-label="${label}"><span></span></label></div>`;
+  return `
+    <div class="backbar"><button class="iconbtn" data-go="home" aria-label="Back to home">${ICONS.back}</button></div>
+    <header class="page-head"><div class="art" style="color:var(--forest)">${ICONS.gear}</div><div><h1>Settings</h1><p>Reminders and backups.</p></div><span></span></header>
+    <div class="rule"></div>
+    <section class="group"><h2>Account</h2>
+      <div class="row"><div class="label">Signed in<small>${esc(session?.user?.email || 'Not signed in')}</small></div>
+        <button class="btn ghost" data-act="sign-out" style="min-height:40px">Sign out</button></div>
+      <div class="row"><div class="label">Cloud backup<small id="sync-status">${esc(syncText())}</small></div>
+        <button class="btn ghost" data-act="sync-now" style="min-height:40px">Sync now</button></div>
+    </section>
+    <section class="group"><h2>Reminders</h2>
+      ${toggle('notifications', 'Phone notifications', permNote)}
+      ${toggle('shakeReminders', 'Daily shake reminders', 'Show a "shaken today" check on each infusing jar.')}
+    </section>
+    <section class="group"><h2>Backup file</h2>
+      <div class="row"><div class="label">Save a backup<small>Everything is already saved to your account. This makes an extra copy as a file.</small></div>
+        <button class="btn ghost" data-act="export" style="min-height:40px">Save</button></div>
+      <div class="row"><div class="label">Load a file<small>Restore a backup, or add items from a file someone sends you.</small></div>
+        <label class="btn ghost" style="min-height:40px">Load<input type="file" accept="application/json,.json" id="import" hidden></label></div>
+    </section>
+    <p class="fineprint">${state.tinctures.length} tinctures · ${state.salves.length} salves · ${state.inventory.length} finished · ${state.recipes.length} recipes</p>`;
+}
+
+/* ================= Cloud sync (Supabase) ================= */
+
+const COLLECTIONS = ['tinctures', 'salves', 'inventory', 'recipes'];
+const SYNCED_KEY = 'mtws-synced-v1';
+const TABLE = 'apothecary_items';
+const cfg = window.MTWS_CONFIG || {};
+const sb = cfg.supabaseUrl && cfg.supabaseKey && window.supabase
+  ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey)
+  : null;
+let session = null;
+let syncTimer = null;
+let syncing = false;
+let syncState = 'idle'; // idle | saving | offline | error
+
+function syncText() {
+  if (!sb) return 'Offline. Changes are saved on this phone and will upload later.';
+  if (syncState === 'saving') return 'Saving…';
+  if (syncState === 'offline') return 'Offline. Changes will upload when you\'re back online.';
+  if (syncState === 'error') return 'Couldn\'t reach your account. Will try again.';
+  return pendingChanges().count ? 'Waiting to upload changes…' : 'All changes saved to your account.';
+}
+
+function setSyncState(s) {
+  syncState = s;
+  const el = $('#sync-status');
+  if (el) el.textContent = syncText();
+}
+
+// Small string hash, so we can tell which items changed since the last upload.
+function hash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(36);
+}
+
+function loadSynced() { try { return JSON.parse(localStorage.getItem(SYNCED_KEY)) || {}; } catch (e) { return {}; } }
+function storeSynced(map) { try { localStorage.setItem(SYNCED_KEY, JSON.stringify(map)); } catch (e) { /* retried next sync */ } }
+
+function currentMap() {
+  const map = {};
+  for (const c of COLLECTIONS) for (const item of state[c]) map[`${c}/${item.id}`] = hash(JSON.stringify(item));
+  return map;
+}
+
+function pendingChanges() {
+  const synced = loadSynced(), now = currentMap();
+  const changed = Object.keys(now).filter(k => synced[k] !== now[k]);
+  const removed = Object.keys(synced).filter(k => !(k in now));
+  return { changed, removed, now, count: changed.length + removed.length };
+}
+
+function scheduleSync() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => pushChanges(), 800);
+}
+
+// Uploads anything added or changed since the last sync, and removes deleted items.
+async function pushChanges() {
+  if (!sb || !session || syncing) return false;
+  const { changed, removed, now } = pendingChanges();
+  if (!changed.length && !removed.length) { setSyncState('idle'); return true; }
+  if (!navigator.onLine) { setSyncState('offline'); return false; }
+  syncing = true;
+  setSyncState('saving');
+  try {
+    const stamp = new Date().toISOString();
+    const rows = changed.map(k => {
+      const [collection, id] = [k.slice(0, k.indexOf('/')), k.slice(k.indexOf('/') + 1)];
+      return { user_id: session.user.id, collection, id, data: state[collection].find(x => x.id === id), updated_at: stamp };
+    });
+    for (let i = 0; i < rows.length; i += 200) {
+      const { error } = await sb.from(TABLE).upsert(rows.slice(i, i + 200), { onConflict: 'user_id,collection,id' });
+      if (error) throw error;
+    }
+    for (const c of COLLECTIONS) {
+      const ids = removed.filter(k => k.startsWith(c + '/')).map(k => k.slice(c.length + 1));
+      if (!ids.length) continue;
+      const { error } = await sb.from(TABLE).delete().eq('collection', c).in('id', ids);
+      if (error) throw error;
+    }
+    const synced = loadSynced();
+    for (const k of changed) synced[k] = now[k];
+    for (const k of removed) delete synced[k];
+    storeSynced(synced);
+    syncing = false;
+    setSyncState('idle');
+    if (pendingChanges().count) scheduleSync(); // edits made while uploading
+    return true;
+  } catch (e) {
+    syncing = false;
+    setSyncState(navigator.onLine ? 'error' : 'offline');
+    return false;
+  }
+}
+
+// Uploads local changes first, then replaces local data with what's in her account
+// (so edits made on another device show up here).
+async function pullChanges() {
+  if (!sb || !session) return;
+  if (!(await pushChanges())) return;
+  try {
+    const { data, error } = await sb.from(TABLE).select('collection,id,data').limit(5000);
+    if (error) throw error;
+    if (pendingChanges().count) return; // she edited something mid-download; next sync catches up
+    const fresh = Object.fromEntries(COLLECTIONS.map(c => [c, []]));
+    for (const row of data) if (fresh[row.collection]) fresh[row.collection].push(row.data);
+    Object.assign(state, fresh);
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* cache only */ }
+    storeSynced(currentMap());
+    setSyncState('idle');
+    if (!$('#sheet-root').firstChild && !document.activeElement?.matches('input, textarea, select')) render();
+  } catch (e) {
+    setSyncState(navigator.onLine ? 'error' : 'offline');
+  }
+}
+
+/* ---------- Sign in ---------- */
+
+function showSignIn(message = '') {
+  document.body.classList.add('signed-out');
+  closeSheet();
+  $('#view').innerHTML = `
+    <div class="signin">
+      <img class="home-logo" src="icons/logo.png" alt="Mountain Trails Wellness Studio">
+      <div class="rule"></div>
+      <h1>Welcome back</h1>
+      <p class="fineprint">Sign in to see your tinctures, salves and recipes.</p>
+      ${sb ? `<form id="signin-form">
+        <label class="field"><span>Email</span><input type="email" name="email" autocomplete="username" required></label>
+        <label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
+        <p class="form-error" id="signin-error" role="alert">${esc(message)}</p>
+        <button class="btn block" type="submit">Sign in</button>
+        <button class="linkbtn" type="button" id="forgot">Forgot password?</button>
+      </form>` : `<p class="form-error">Can't reach the sign-in service right now. Check the internet connection and reopen the app.</p>`}
+    </div>`;
+  const form = $('#signin-form');
+  if (!form) return;
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    const { error } = await sb.auth.signInWithPassword({ email: form.email.value.trim(), password: form.password.value });
+    if (error) {
+      btn.disabled = false; btn.textContent = 'Sign in';
+      $('#signin-error').textContent = /invalid/i.test(error.message) ? 'That email or password isn\'t right.' : navigator.onLine ? error.message : 'You\'re offline. Connect to the internet to sign in.';
+    }
+  });
+  $('#forgot').onclick = async () => {
+    const email = form.email.value.trim();
+    if (!email) { $('#signin-error').textContent = 'Type your email above first, then tap "Forgot password?"'; return; }
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    $('#signin-error').textContent = error ? 'Couldn\'t send the email. Try again in a minute.' : 'Check your email for a link to set a new password.';
+  };
+}
+
+// Opened from the "reset password" email link.
+function showNewPassword() {
+  openSheet(`
+    <div class="sheet-head"><h2>Set a new password</h2></div>
+    <form id="np">
+      <label class="field"><span>New password</span><input type="password" name="pw" minlength="8" autocomplete="new-password" required></label>
+      <p class="form-error" id="np-error" role="alert"></p>
+      <button class="btn block" type="submit">Save password</button>
+    </form>`, sheet => {
+    $('#np', sheet).addEventListener('submit', async e => {
+      e.preventDefault();
+      const { error } = await sb.auth.updateUser({ password: e.target.pw.value });
+      if (error) { $('#np-error', sheet).textContent = error.message; return; }
+      closeSheet();
+      toast('Password saved. Use it next time you sign in.');
+    });
+  });
+}
+
+async function signOut() {
+  if (pendingChanges().count && !confirm('Some changes haven\'t uploaded yet and will be lost if you sign out. Sign out anyway?')) return;
+  if (!confirm('Sign out of the app on this phone?')) return;
+  await sb?.auth.signOut();
+  localStorage.removeItem(STORE_KEY);
+  localStorage.removeItem(SYNCED_KEY);
+  state = defaultState();
+  session = null;
+  showSignIn();
+}
+
+function enterApp() {
+  document.body.classList.remove('signed-out');
+  ui.tab = 'home';
+  render();
+  setTimeout(checkReminders, 600);
+  pullChanges();
+}
+
+async function setNotifications(on, input) {
+  if (!on) { state.settings.notifications = false; save(); return; }
+  if (!('Notification' in window)) { input.checked = false; toast('Add the app to your Home Screen to turn on notifications.'); return; }
+  let perm = Notification.permission;
+  if (perm === 'default') perm = await Notification.requestPermission();
+  if (perm !== 'granted') { input.checked = false; state.settings.notifications = false; save(); render(); toast('Notifications were not allowed.'); return; }
+  state.settings.notifications = true;
+  save();
+  notify('Reminders are on', 'You\'ll get a heads-up when a batch is ready.');
+}
+
+function exportData() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `apothecary-backup-${today()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const lists = ['tinctures', 'salves', 'inventory', 'recipes'];
+      if (!lists.some(k => Array.isArray(data[k]))) throw new Error('bad file');
+      const count = lists.reduce((n, k) => n + (data[k]?.length || 0), 0);
+      const hasData = lists.some(k => state[k].length);
+      let mode = 'replace';
+      if (hasData) {
+        if (confirm(`This file has ${plural(count, 'item')}. Add them to what's already in the app?\n\nOK = add (keeps everything you have)\nCancel = more options`)) mode = 'add';
+        else if (!confirm('Replace EVERYTHING in the app with this file instead? This can\'t be undone.')) return;
+      }
+      if (mode === 'add') {
+        let added = 0;
+        for (const k of lists) {
+          const have = new Set(state[k].map(x => x.id));
+          for (const item of data[k] || []) if (!have.has(item.id)) { state[k].push(item); added++; }
+        }
+        save(); render(); checkReminders(); toast(`Added ${plural(added, 'item')}`);
+      } else {
+        const base = defaultState();
+        state = { ...base, ...data, settings: { ...base.settings, ...state.settings, ...data.settings } };
+        save(); render(); checkReminders(); toast(`Loaded ${plural(count, 'item')}`);
+      }
+    } catch (e) { toast('That file isn\'t an apothecary backup.'); }
+  };
+  reader.readAsText(file);
+}
+
+/* ================= Reminders ================= */
+
+async function notify(title, body) {
+  if (!state.settings.notifications || !('Notification' in window) || Notification.permission !== 'granted') return false;
+  try {
+    const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg) await reg.showNotification(title, { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: title });
+    else new Notification(title, { body, icon: 'icons/icon-192.png' });
+    return true;
+  } catch (e) { return false; }
+}
+
+// Runs on open, when the app comes back to the foreground, and hourly while open.
+// Each batch alerts once, when it's ready.
+function checkReminders() {
+  const alerts = [];
+  for (const kind of ['tincture', 'salve']) {
+    for (const b of state[KIND[kind].list]) {
+      const info = batchInfo(b);
+      if (info.ready && !b.notifiedReady) {
+        alerts.push([`${b.name} is ready`, kind === 'tincture' ? 'Time to strain and bottle it.' : 'The oil is ready. Time to make the salve.']);
+        b.notifiedReady = true;
+      }
+    }
+  }
+  if (state.settings.shakeReminders && state.lastShakeNotice !== today()) {
+    const need = state.tinctures.filter(b => !batchInfo(b).ready && state.shaken[b.id] !== today()).length;
+    if (need) alerts.push(['Shake day', `${plural(need, 'jar')} could use a shake today.`]);
+    state.lastShakeNotice = today();
+  }
+  if (!alerts.length) return;
+  save();
+  alerts.forEach(([t, body]) => notify(t, body));
+  toast(alerts.length === 1 ? `${alerts[0][0]}. ${alerts[0][1]}` : `Reminders: ${alerts.map(a => a[0]).join(' · ')}`, 6000);
+}
+
+/* ================= Sheet ================= */
+
+function openSheet(html, mount) {
+  const root = $('#sheet-root');
+  root.innerHTML = `<div class="scrim"><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${html}</div></div>`;
+  const scrim = $('.scrim', root);
+  const sheet = $('.sheet', root);
+  scrim.addEventListener('click', e => { if (e.target === scrim || e.target.closest('[data-close]')) closeSheet(); });
+  document.body.style.overflow = 'hidden';
+  mount?.(sheet);
+  const first = sheet.querySelector('input:not([type=hidden]), select, textarea, button');
+  if (first && first.matches('input, select, textarea') && !matchMedia('(pointer: coarse)').matches) first.focus();
+}
+
+function closeSheet() {
+  $('#sheet-root').innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#sheet-root').firstChild) closeSheet(); });
+
+/* ================= View bindings ================= */
+
+function kindForTab() { return ui.tab === 'salves' ? 'salve' : 'tincture'; }
+
+function bindView() {
+  const v = $('#view');
+
+  v.onclick = e => {
+    const t = e.target;
+    const shake = t.closest('[data-shake]');
+    if (shake) {
+      e.stopPropagation();
+      const id = shake.dataset.shake;
+      if (state.shaken[id] === today()) delete state.shaken[id]; else state.shaken[id] = today();
+      save(); render(); return;
+    }
+    const filter = t.closest('[data-filter]');
+    if (filter) { ui.filters[filter.dataset.filter] = filter.dataset.val; render(); return; }
+    const goBtn = t.closest('[data-go]');
+    if (goBtn) {
+      const tab = goBtn.dataset.go;
+      if (goBtn.dataset.goFilter && ui.filters[tab] !== undefined) ui.filters[tab] = goBtn.dataset.goFilter;
+      else if (ui.filters[tab] !== undefined && tab !== 'recipes') ui.filters[tab] = 'all';
+      return go(tab);
+    }
+    const rtab = t.closest('[data-rtab]');
+    if (rtab) { ui.recipeTab = rtab.dataset.rtab; render(); return; }
+
+    const ob = t.closest('[data-open-batch]');
+    if (ob) return batchDetail(ob.dataset.kind, ob.dataset.openBatch);
+    const oi = t.closest('[data-open-item]');
+    if (oi) return itemForm(state.inventory.find(i => i.id === oi.dataset.openItem));
+    const orc = t.closest('[data-open-recipe]');
+    if (orc) { ui.recipeId = orc.dataset.openRecipe; ui.recipeTab = 'details'; render(); window.scrollTo(0, 0); return; }
+
+    const act = t.closest('[data-act]')?.dataset.act;
+    if (act === 'add-batch') batchForm(kindForTab());
+    else if (act === 'home-add-tincture') batchForm('tincture');
+    else if (act === 'home-add-salve') batchForm('salve');
+    else if (act === 'add-item') itemForm();
+    else if (act === 'add-recipe') recipeForm();
+    else if (act === 'recipe-back') { ui.recipeId = null; render(); }
+    else if (act === 'edit-recipe') recipeForm(state.recipes.find(r => r.id === ui.recipeId));
+    else if (act === 'batch-from-recipe') {
+      const r = state.recipes.find(x => x.id === ui.recipeId);
+      ui.tab = r.type === 'salve' ? 'salves' : 'infusing';
+      ui.recipeId = null;
+      render();
+      batchForm(r.type, null, r.id);
+    }
+    else if (act === 'export') exportData();
+    else if (act === 'sign-out') signOut();
+    else if (act === 'sync-now') pullChanges().then(() => toast(syncText()));
+  };
+
+  v.onkeydown = e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role=button]')) { e.preventDefault(); e.target.click(); }
+  };
+
+  const invQ = $('#inv-q', v);
+  if (invQ) invQ.oninput = () => { ui.search.inventory = invQ.value; rerenderKeepingFocus('#inv-q'); };
+  const invT = $('#inv-type', v);
+  if (invT) invT.onchange = () => { ui.filters.inventory = invT.value; render(); };
+  const recQ = $('#rec-q', v);
+  if (recQ) recQ.oninput = () => { ui.search.recipes = recQ.value; rerenderKeepingFocus('#rec-q'); };
+
+  $$('[data-setting]', v).forEach(inp => inp.onchange = () => {
+    const key = inp.dataset.setting;
+    if (key === 'notifications') return setNotifications(inp.checked, inp);
+    state.settings[key] = inp.checked;
+    save();
+  });
+  const imp = $('#import', v);
+  if (imp) imp.onchange = () => { if (imp.files[0]) importData(imp.files[0]); imp.value = ''; };
+}
+
+function rerenderKeepingFocus(sel) {
+  const pos = $(sel).selectionStart;
+  render();
+  const el = $(sel);
+  el.focus();
+  el.setSelectionRange(pos, pos);
+}
+
+/* ================= Boot ================= */
+
+$$('.tabbar .ti').forEach(el => { el.innerHTML = ICONS[el.dataset.icon]; });
+$$('.tabbar button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
+
+async function boot() {
+  if (sb) {
+    const { data } = await sb.auth.getSession();
+    session = data.session;
+    sb.auth.onAuthStateChange((event, s) => {
+      const wasSignedIn = !!session;
+      session = s;
+      // Supabase calls made directly inside this callback can stall, so defer them.
+      if (event === 'PASSWORD_RECOVERY') setTimeout(() => { enterApp(); showNewPassword(); });
+      else if (event === 'SIGNED_IN' && !wasSignedIn) setTimeout(enterApp);
+      else if (event === 'SIGNED_OUT' && wasSignedIn) setTimeout(() => showSignIn('You\'ve been signed out. Please sign in again.'));
+    });
+    if (session) enterApp(); else showSignIn();
+  } else if (cfg.supabaseUrl && state.tinctures.concat(state.salves, state.inventory, state.recipes).length) {
+    // The sign-in library couldn't load (offline, first open of the day): use what's on the phone.
+    enterApp();
+  } else {
+    showSignIn();
+  }
+}
+
+boot();
+setInterval(() => { if (document.body.classList.contains('signed-out')) return; render(); checkReminders(); }, 60 * 60 * 1000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || document.body.classList.contains('signed-out')) return;
+  if (!$('#sheet-root').firstChild) { render(); checkReminders(); }
+  pullChanges();
+});
+window.addEventListener('online', () => pullChanges());
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}

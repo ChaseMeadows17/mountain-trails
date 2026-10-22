@@ -1,0 +1,16 @@
+﻿{
+  "name": "Mountain Trails Apothecary",
+  "short_name": "Apothecary",
+  "description": "Tincture, salve, inventory and recipe tracker for Mountain Trails Wellness Studio.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F7EBD6",
+  "theme_color": "#2E4B32",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
