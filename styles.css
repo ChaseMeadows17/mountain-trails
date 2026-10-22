@@ -170,6 +170,23 @@ button { cursor: pointer; }
   background: rgba(155,174,130,.3); color: var(--forest); border: 1px solid rgba(46,75,50,.2);
   margin: 4px 0 2px;
 }
+.checks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.check-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 0 12px; border-radius: 999px;
+  border: 1px dashed var(--amber); background: rgba(212,162,88,.12); color: var(--walnut);
+  font-size: 13.5px; font-weight: 500;
+}
+.check-chip.done { border: 1px solid var(--forest); background: rgba(155,174,130,.28); color: var(--forest); }
+.check-chip small { color: var(--walnut-2); font-weight: 400; }
+.check-chip:disabled { opacity: 1; cursor: default; }
+.checkrow { display: flex; gap: 10px; flex-wrap: wrap; }
+.check {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card); font-size: 15px;
+}
+.check input { width: 20px; height: 20px; accent-color: var(--forest); }
+.hico.todo { background: rgba(212,162,88,.3); color: var(--walnut); }
 .made { display: grid; justify-items: center; min-width: 48px; }
 .made b { font-family: var(--serif-head); font-size: 30px; line-height: 1; }
 .made small { font-size: 12px; color: var(--walnut-2); }

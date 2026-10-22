@@ -88,6 +88,7 @@ function toast(msg, ms = 3800) {
 /* ================= Icons & art ================= */
 
 const ICONS = {
+  tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
   tea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h13v4a6 6 0 0 1-6 6h-1a6 6 0 0 1-6-6z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M8 7c0-1.5 1.5-2 1.5-3.5M12 7c0-1.5 1.5-2 1.5-3.5"/><path d="M3 21h16"/></svg>',
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20 9 9l3.5 5L16 8l6 12z"/><circle cx="6.5" cy="6" r="2"/></svg>',
   bottle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4v3h-4z"/><path d="M9 5h6v2.5c2 .8 3 2.3 3 4.2V20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-8.3c0-1.9 1-3.4 3-4.2z"/><path d="M8.5 13h7v5h-7z"/></svg>',
@@ -189,7 +190,7 @@ function inventoryArt(type) {
 
 const ui = {
   tab: 'home',
-  filters: { infusing: 'all', salves: 'all', inventory: 'all', recipes: 'all' },
+  filters: { infusing: 'all', salves: 'all', inventory: 'all', recipes: 'all', todo: 'all' },
   search: { inventory: '', recipes: '' },
   recipeId: null,
   recipeTab: 'details',
@@ -275,6 +276,19 @@ function viewHome() {
   const tile = (n, label, tab, filter) =>
     `<button class="tile" data-go="${tab}" ${filter ? `data-go-filter="${filter}"` : ''}><b>${n}</b><span>${label}</span></button>`;
 
+  // Finished batches still waiting to be bottled or labeled.
+  const todoRow = (list, what, todo, icon) => {
+    if (!list.length) return '';
+    const names = list.map(i => i.name);
+    const preview = names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3} more` : '');
+    return `<button class="hrow" data-go="inventory" data-go-todo="${todo}">
+        <span class="hico todo">${icon}</span>
+        <span><b>${list.length} ${list.length === 1 ? 'batch' : 'batches'} ${what}</b><small>${esc(preview)}</small></span>
+        <span class="chev">${ICONS.chev}</span></button>`;
+  };
+  const todos = todoRow(state.inventory.filter(needsBottling), 'to bottle', 'bottle', ICONS.bottle)
+    + todoRow(state.inventory.filter(needsLabel), 'to label', 'label', ICONS.tag);
+
   // Needs attention: things she can act on today.
   const attention = [
     ...ready.map(x => `<button class="hrow" data-open-batch="${x.b.id}" data-kind="${x.kind}">
@@ -285,6 +299,7 @@ function viewHome() {
         <span class="hico">${ICONS.bottle}</span>
         <span><b>Shake ${plural(shakeNeed, 'jar')}</b><small>Daily shake</small></span>
         <span class="chev">${ICONS.chev}</span></button>` : '',
+    todos,
   ].join('');
 
   // Coming up: upcoming batches grouped by ready date.
@@ -323,7 +338,7 @@ function viewHome() {
 
     <section class="panel">
       <h2>Needs attention</h2>
-      ${attention || `<p class="caught">${ICONS.jar}<span>All caught up. Nothing to strain today.</span></p>`}
+      ${attention || `<p class="caught">${ICONS.jar}<span>All caught up. Nothing to strain, bottle or label.</span></p>`}
     </section>
 
     <section class="panel">
@@ -528,6 +543,32 @@ function batchDetail(kind, id) {
 }
 
 // Strain a tincture / pour a salve: the batch leaves the tracker and is logged as finished.
+/* ---------- Bottled / Labeled checks on finished batches ---------- */
+
+const shortDate = d => parseDate(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const needsBottling = i => !i.bottled;
+const needsLabel = i => !!i.bottled && !i.labeled; // labels go on once it's bottled
+
+// The two checkboxes used in the finish/add/edit forms.
+function checkFields(i = {}) {
+  return `<div class="field"><span>Progress</span><div class="checkrow">
+    <label class="check"><input type="checkbox" name="bottled" ${i.bottled ? 'checked' : ''}> Bottled</label>
+    <label class="check"><input type="checkbox" name="labeled" ${i.labeled ? 'checked' : ''}> Labeled</label>
+  </div></div>`;
+}
+// Keeps the original date when a box stays checked; today's date when newly checked.
+const checkValue = (checked, prev) => checked ? (prev || today()) : null;
+
+// The two tap-to-check buttons on a finished card.
+function checkChips(i) {
+  const chip = (field, label) => {
+    const d = i[field];
+    return `<button class="check-chip ${d ? 'done' : ''}" data-check="${field}" data-id="${i.id}" aria-pressed="${!!d}" ${canEdit('inventory') ? '' : 'disabled'}>
+      ${d ? `✓ ${label} <small>${shortDate(d)}</small>` : `○ ${label}`}</button>`;
+  };
+  return `<div class="wide checks">${chip('bottled', 'Bottled')}${chip('labeled', 'Labeled')}</div>`;
+}
+
 function finishForm(kind, b) {
   const isT = kind === 'tincture';
   openSheet(`
@@ -539,7 +580,8 @@ function finishForm(kind, b) {
         <label class="field"><span>How many made</span><input type="number" name="qty" min="0" inputmode="numeric" placeholder="e.g. 32"></label>
         <label class="field"><span>Size</span><input name="size" placeholder="${isT ? 'e.g. 2 oz bottles' : 'e.g. 2 oz tins'}"></label>
       </div>
-      <label class="field"><span>${isT ? 'Bottled on' : 'Poured on'}</span><input type="date" name="date" required value="${today()}"></label>
+      <label class="field"><span>${isT ? 'Strained on' : 'Poured on'}</span><input type="date" name="date" required value="${today()}"></label>
+      ${checkFields()}
       <button class="btn block" type="submit">Mark as finished</button>
     </form>`, sheet => {
     $('#ff', sheet).addEventListener('submit', e => {
@@ -549,6 +591,7 @@ function finishForm(kind, b) {
         id: uid(), type: kind, name: f.name.value.trim(), size: f.size.value.trim(),
         qty: f.qty.value === '' ? null : Math.max(0, Number(f.qty.value)), date: f.date.value,
         started: b.start, notes: b.notes || '',
+        bottled: checkValue(f.bottled.checked), labeled: checkValue(f.labeled.checked),
       });
       const list = KIND[kind].list;
       state[list] = state[list].filter(x => x.id !== b.id);
@@ -566,8 +609,10 @@ const TYPE_LABEL = { tincture: 'Tincture', salve: 'Salve', tea: 'Tea', other: 'O
 function viewInventory() {
   const q = ui.search.inventory.toLowerCase();
   const f = ui.filters.inventory;
+  const todo = ui.filters.todo;
   const items = state.inventory
     .filter(i => (f === 'all' || i.type === f) && (!q || i.name.toLowerCase().includes(q)))
+    .filter(i => todo === 'bottle' ? needsBottling(i) : todo === 'label' ? needsLabel(i) : true)
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.name.localeCompare(b.name));
   const head = `<div class="backbar"><button class="iconbtn" data-go="home" aria-label="Back to home">${ICONS.back}</button></div>` + pageHead(`<span style="color:var(--forest)">${ICONS.shelf}</span>`, 'Finished', 'A record of every batch you\'ve made.', 'add-item');
 
@@ -581,14 +626,16 @@ function viewInventory() {
         ${[['all', 'All Types'], ['tincture', 'Tinctures'], ['salve', 'Salves'], ['tea', 'Teas'], ['other', 'Other']].map(([v, l]) => `<option value="${v}" ${f === v ? 'selected' : ''}>${l}</option>`).join('')}
       </select>
     </div>
+    ${chips('todo', [['all', 'All'], ['bottle', `Needs bottling (${state.inventory.filter(needsBottling).length})`], ['label', `Needs labels (${state.inventory.filter(needsLabel).length})`]])}
     <div class="list">${items.map(i => `
-      <button class="card" data-open-item="${i.id}">
+      <div class="card" data-open-item="${i.id}" role="button" tabindex="0">
         <div class="thumb">${inventoryArt(i.type)}</div>
         <div><h3>${esc(i.name)}</h3>
           <p class="meta">${i.type === 'salve' ? 'Poured' : 'Finished'} ${fmtDate(i.date)}${i.started ? `<br>Started ${fmtDate(i.started)}` : ''}</p>
           ${i.size ? `<span class="tag">${esc(i.size)}</span>` : ''}</div>
         ${i.qty != null ? `<div class="made"><b>${i.qty}</b><small>made</small></div>` : `<span class="chev">${ICONS.chev}</span>`}
-      </button>`).join('') || '<p class="fineprint">No matches.</p>'}</div>`;
+        ${checkChips(i)}
+      </div>`).join('') || `<p class="fineprint">${todo === 'all' ? 'No matches.' : 'All done here.'}</p>`}</div>`;
 }
 
 function itemForm(existing, preset = {}) {
@@ -606,6 +653,7 @@ function itemForm(existing, preset = {}) {
         <label class="field"><span>Started</span><input type="date" name="started" value="${i.started || ''}"></label>
         <label class="field"><span>Finished</span><input type="date" name="date" required value="${i.date}"></label>
       </div>
+      ${checkFields(i)}
       <label class="field"><span>Notes</span><textarea name="notes">${esc(i.notes)}</textarea></label>
       <button class="btn block" type="submit">${existing ? 'Save changes' : 'Add to Finished'}</button>
       ${existing ? '<button class="btn danger block" type="button" data-delete style="margin-top:10px">Delete</button>' : ''}
@@ -622,6 +670,7 @@ function itemForm(existing, preset = {}) {
         name: form.name.value.trim(), type: form.type.value,
         qty: form.qty.value === '' ? null : Math.max(0, Number(form.qty.value)),
         size: form.size.value.trim(), started: form.started.value, date: form.date.value, notes: form.notes.value.trim(),
+        bottled: checkValue(form.bottled.checked, i.bottled), labeled: checkValue(form.labeled.checked, i.labeled),
       };
       if (existing) Object.assign(existing, data); else state.inventory.push({ id: uid(), ...data });
       save(); closeSheet(); render();
@@ -1268,9 +1317,21 @@ function bindView() {
     }
     const filter = t.closest('[data-filter]');
     if (filter) { ui.filters[filter.dataset.filter] = filter.dataset.val; render(); return; }
+    const check = t.closest('[data-check]');
+    if (check) {
+      const item = state.inventory.find(x => x.id === check.dataset.id);
+      if (item && canEdit('inventory')) {
+        const f = check.dataset.check;
+        item[f] = item[f] ? null : today();
+        save(); render();
+        toast(item[f] ? `${item.name}: ${f === 'bottled' ? 'bottled' : 'labeled'} ✓` : `${item.name}: unchecked ${f}`);
+      }
+      return;
+    }
     const goBtn = t.closest('[data-go]');
     if (goBtn) {
       const tab = goBtn.dataset.go;
+      if (tab === 'inventory') ui.filters.todo = goBtn.dataset.goTodo || 'all';
       if (goBtn.dataset.goFilter && ui.filters[tab] !== undefined) ui.filters[tab] = goBtn.dataset.goFilter;
       else if (ui.filters[tab] !== undefined && tab !== 'recipes') ui.filters[tab] = 'all';
       return go(tab);
