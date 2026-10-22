@@ -88,6 +88,7 @@ function toast(msg, ms = 3800) {
 /* ================= Icons & art ================= */
 
 const ICONS = {
+  tea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h13v4a6 6 0 0 1-6 6h-1a6 6 0 0 1-6-6z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M8 7c0-1.5 1.5-2 1.5-3.5M12 7c0-1.5 1.5-2 1.5-3.5"/><path d="M3 21h16"/></svg>',
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20 9 9l3.5 5L16 8l6 12z"/><circle cx="6.5" cy="6" r="2"/></svg>',
   bottle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4v3h-4z"/><path d="M9 5h6v2.5c2 .8 3 2.3 3 4.2V20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-8.3c0-1.9 1-3.4 3-4.2z"/><path d="M8.5 13h7v5h-7z"/></svg>',
   tin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="9" rx="9" ry="3.2"/><path d="M3 9v6c0 1.8 4 3.2 9 3.2s9-1.4 9-3.2V9"/><path d="M3 12c0 1.8 4 3.2 9 3.2s9-1.4 9-3.2"/></svg>',
@@ -167,8 +168,21 @@ function tinArt() {
   </svg>`;
 }
 
+// Teacup with a sprig, for tea blends and tea batches.
+function teaArt() {
+  return `<svg viewBox="0 0 64 60">
+    <path d="M10 26h36v8a16 16 0 0 1-16 16h-4a16 16 0 0 1-16-16z" fill="#F7EBD6" stroke="#3E2F1F" stroke-width="1.2"/>
+    <path d="M12 30h32" stroke="#C98F4A" stroke-width="5" opacity=".55"/>
+    <path d="M46 29h3.5a5.5 5.5 0 0 1 0 11H44" fill="none" stroke="#3E2F1F" stroke-width="1.2"/>
+    <ellipse cx="28" cy="54" rx="22" ry="3.5" fill="#E6D3AF" stroke="#3E2F1F" stroke-width="1"/>
+    <path d="M20 20c0-4 4-5 4-9M28 20c0-4 4-5 4-9" fill="none" stroke="#6B5844" stroke-width="1.1" stroke-linecap="round"/>
+    <path d="M44 22c3-6 8-9 14-9-1 6-6 10-14 9z" fill="#9BAE82" stroke="#2E4B32" stroke-width=".9"/>
+    <path d="M44 22c4-3 7-5 10-7" fill="none" stroke="#2E4B32" stroke-width=".7"/>
+  </svg>`;
+}
+
 function inventoryArt(type) {
-  return type === 'salve' ? tinArt() : type === 'tincture' ? bottleArt(70) : sprigArt('other');
+  return type === 'salve' ? tinArt() : type === 'tincture' ? bottleArt(70) : type === 'tea' ? teaArt() : sprigArt('other');
 }
 
 /* ================= Navigation ================= */
@@ -196,13 +210,14 @@ function render() {
   else if (ui.tab === 'salves') v.innerHTML = viewBatches('salve');
   else if (ui.tab === 'inventory') v.innerHTML = viewInventory();
   else if (ui.tab === 'recipes') v.innerHTML = ui.recipeId ? viewRecipe() : viewRecipes();
+  else if (ui.tab === 'teas') v.innerHTML = ui.recipeId ? viewRecipe() : viewTeas();
   else v.innerHTML = viewSettings();
   bindView();
 }
 
 // Which collection an "add" button writes to, so it can be hidden for people who can't.
 function actAllowed(act) {
-  const coll = { 'add-item': 'inventory', 'add-recipe': 'recipes', 'add-batch': ui.tab === 'salves' ? 'salves' : 'tinctures' }[act];
+  const coll = { 'add-item': 'inventory', 'add-recipe': 'recipes', 'add-tea': 'recipes', 'add-batch': ui.tab === 'salves' ? 'salves' : 'tinctures' }[act];
   return !coll || canEdit(coll);
 }
 
@@ -546,7 +561,7 @@ function finishForm(kind, b) {
 
 /* ================= Finished ================= */
 
-const TYPE_LABEL = { tincture: 'Tincture', salve: 'Salve', other: 'Other' };
+const TYPE_LABEL = { tincture: 'Tincture', salve: 'Salve', tea: 'Tea', other: 'Other' };
 
 function viewInventory() {
   const q = ui.search.inventory.toLowerCase();
@@ -554,7 +569,7 @@ function viewInventory() {
   const items = state.inventory
     .filter(i => (f === 'all' || i.type === f) && (!q || i.name.toLowerCase().includes(q)))
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.name.localeCompare(b.name));
-  const head = pageHead(`<span style="color:var(--forest)">${ICONS.shelf}</span>`, 'Finished', 'A record of every batch you\'ve made.', 'add-item');
+  const head = `<div class="backbar"><button class="iconbtn" data-go="home" aria-label="Back to home">${ICONS.back}</button></div>` + pageHead(`<span style="color:var(--forest)">${ICONS.shelf}</span>`, 'Finished', 'A record of every batch you\'ve made.', 'add-item');
 
   if (!state.inventory.length) {
     return head + emptyState('Nothing finished yet', 'When you strain a tincture or pour a salve it\'s logged here: what you made, how many, and when. You can also add one by hand.', 'add-item', 'Add a finished batch');
@@ -563,7 +578,7 @@ function viewInventory() {
     <div class="searchrow">
       <label class="search">${ICONS.search}<input type="search" id="inv-q" placeholder="Search finished…" value="${esc(ui.search.inventory)}" aria-label="Search finished batches"></label>
       <select id="inv-type" aria-label="Type">
-        ${[['all', 'All Types'], ['tincture', 'Tinctures'], ['salve', 'Salves'], ['other', 'Other']].map(([v, l]) => `<option value="${v}" ${f === v ? 'selected' : ''}>${l}</option>`).join('')}
+        ${[['all', 'All Types'], ['tincture', 'Tinctures'], ['salve', 'Salves'], ['tea', 'Teas'], ['other', 'Other']].map(([v, l]) => `<option value="${v}" ${f === v ? 'selected' : ''}>${l}</option>`).join('')}
       </select>
     </div>
     <div class="list">${items.map(i => `
@@ -576,8 +591,8 @@ function viewInventory() {
       </button>`).join('') || '<p class="fineprint">No matches.</p>'}</div>`;
 }
 
-function itemForm(existing) {
-  const i = existing || { name: '', type: 'tincture', size: '', qty: null, date: today(), started: '', notes: '' };
+function itemForm(existing, preset = {}) {
+  const i = existing || { name: '', type: 'tincture', size: '', qty: null, date: today(), started: '', notes: '', ...preset };
   openSheet(`
     <div class="sheet-head"><h2>${!canEdit('inventory') ? 'Finished batch' : existing ? 'Edit finished batch' : 'Add finished batch'}</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
     <form id="if">
@@ -634,14 +649,26 @@ function viewRecipes() {
     .sort((a, b) => a.name.localeCompare(b.name));
   return head + `
     <div class="searchrow"><label class="search">${ICONS.search}<input type="search" id="rec-q" placeholder="Search recipes or herbs…" value="${esc(ui.search.recipes)}" aria-label="Search recipes"></label></div>
-    ${chips('recipes', [['all', 'All'], ['tincture', 'Tinctures'], ['salve', 'Salves'], ['other', 'Other']])}
-    <div class="list">${items.map(r => `
-      <button class="card" data-open-recipe="${r.id}">
-        <div class="thumb">${r.photo ? `<img class="photo" src="${r.photo}" alt="">` : sprigArt(r.name)}</div>
-        <div><h3>${esc(r.name)}</h3><span class="tag">${TYPE_LABEL[r.type]}</span>
-          <p class="meta">${esc(r.description || r.ingredients.map(i => i.name).filter(Boolean).join(', '))}</p></div>
-        <span class="chev">${ICONS.chev}</span>
-      </button>`).join('') || '<p class="fineprint">No matches.</p>'}</div>`;
+    ${chips('recipes', [['all', 'All'], ['tincture', 'Tinctures'], ['salve', 'Salves'], ['tea', 'Teas'], ['other', 'Other']])}
+    <div class="list">${items.map(recipeCard).join('') || '<p class="fineprint">No matches.</p>'}</div>`;
+}
+
+function recipeCard(r) {
+  return `<button class="card" data-open-recipe="${r.id}">
+    <div class="thumb">${r.photo ? `<img class="photo" src="${r.photo}" alt="">` : r.type === 'tea' ? teaArt() : sprigArt(r.name)}</div>
+    <div><h3>${esc(r.name)}</h3><span class="tag">${TYPE_LABEL[r.type]}</span>
+      <p class="meta">${esc(r.description || r.ingredients.map(i => i.name).filter(Boolean).join(', '))}</p></div>
+    <span class="chev">${ICONS.chev}</span>
+  </button>`;
+}
+
+function viewTeas() {
+  const head = pageHead(`<span style="color:var(--forest)">${ICONS.tea}</span>`, 'Teas', 'Your tea blends and how to brew them.', 'add-tea');
+  const teas = state.recipes.filter(r => r.type === 'tea').sort((a, b) => a.name.localeCompare(b.name));
+  if (!teas.length) {
+    return head + emptyState('No tea blends yet', 'Add a blend with its herbs, ratios and brewing steps. When you mix a batch, log it and it shows up in Finished.', 'add-tea', 'Add a tea blend');
+  }
+  return head + `<div class="list">${teas.map(recipeCard).join('')}</div>`;
 }
 
 function viewRecipe() {
@@ -649,11 +676,12 @@ function viewRecipe() {
   if (!r) { ui.recipeId = null; return viewRecipes(); }
   const t = ui.recipeTab;
   const canBatch = r.type === 'tincture' || r.type === 'salve';
+  const isTea = r.type === 'tea';
   let body = '';
   if (t === 'details') {
     body = `<div class="facts">
-        <div class="fact">${ICONS.clock}<div><small>${r.type === 'salve' ? 'Oil infuse time' : 'Infuse time'}</small><b>${esc(r.infuseText || fmtDuration(r.infuseDays))}</b></div></div>
-        <div class="fact">${ICONS.bottle}<div><small>Yield</small><b>${esc(r.yield || '—')}</b></div></div>
+        <div class="fact">${ICONS.clock}<div><small>${isTea ? 'Steep time' : r.type === 'salve' ? 'Oil infuse time' : 'Infuse time'}</small><b>${esc(r.infuseText || fmtDuration(r.infuseDays))}</b></div></div>
+        <div class="fact">${isTea ? ICONS.tea : ICONS.bottle}<div><small>${isTea ? 'Makes' : 'Yield'}</small><b>${esc(r.yield || '—')}</b></div></div>
       </div>
       ${r.steps.length ? `<h2 class="section-h">Steps</h2><ol class="steps">${r.steps.map(s => `<li><span>${esc(s)}</span></li>`).join('')}</ol>` : ''}`;
   } else if (t === 'ingredients') {
@@ -664,7 +692,7 @@ function viewRecipe() {
     body = r.notes ? `<div class="note-box">${esc(r.notes)}</div>` : '<p class="fineprint">No notes yet.</p>';
   }
   return `
-    <div class="backbar"><button class="iconbtn" data-act="recipe-back" aria-label="Back to recipes">${ICONS.back}</button>
+    <div class="backbar"><button class="iconbtn" data-act="recipe-back" aria-label="Back">${ICONS.back}</button>
       ${canEdit('recipes') ? '<button class="btn ghost" data-act="edit-recipe" style="min-height:40px">Edit</button>' : ''}</div>
     <div class="recipe-hero">${r.photo ? `<img class="hero-photo" src="${r.photo}" alt="">` : mountainArt()}
       <h1>${esc(r.name)}</h1><div class="kind">${TYPE_LABEL[r.type]}</div>
@@ -672,6 +700,7 @@ function viewRecipe() {
     <div class="seg">${[['details', 'Details'], ['ingredients', 'Ingredients'], ['notes', 'Notes']].map(([v, l]) =>
       `<button data-rtab="${v}" aria-pressed="${t === v}">${l}</button>`).join('')}</div>
     ${body}
+    ${isTea && canEdit('inventory') ? `<button class="btn block" data-act="log-tea">${ICONS.plus}Log a batch of this tea</button>` : ''}
     ${canBatch && canEdit(r.type === 'salve' ? 'salves' : 'tinctures') ? `<button class="btn block" data-act="batch-from-recipe">${ICONS.plus}Start a ${r.type === 'salve' ? 'salve batch' : 'tincture'} from this recipe</button>` : ''}`;
 }
 
@@ -693,8 +722,8 @@ function squarePhoto(file, size = 360) {
   });
 }
 
-function recipeForm(existing) {
-  const r = existing || { name: '', type: 'tincture', description: '', infuseDays: 42, infuseText: '', yield: '', ingredients: [{ name: '', amount: '' }], steps: [], notes: '' };
+function recipeForm(existing, presetType = 'tincture') {
+  const r = existing || { name: '', type: presetType, description: '', infuseDays: presetType === 'tea' ? 0 : 42, infuseText: '', yield: '', ingredients: [{ name: '', amount: '' }], steps: [], notes: '' };
   const days = r.infuseDays || 0;
   const useWeeks = days % 7 === 0;
   const ingRow = (i = { name: '', amount: '' }) => `<div class="ingrow"><input placeholder="Herb or ingredient" value="${esc(i.name)}" data-ing="name"><input placeholder="1 part" value="${esc(i.amount)}" data-ing="amount"><button type="button" class="iconbtn" data-rm aria-label="Remove">${ICONS.close}</button></div>`;
@@ -716,7 +745,7 @@ function recipeForm(existing) {
         <div class="two"><input type="number" name="amount" min="0" value="${days ? (useWeeks ? days / 7 : days) : ''}" inputmode="numeric">
         <select name="unit"><option value="7" ${useWeeks ? 'selected' : ''}>weeks</option><option value="1" ${useWeeks ? '' : 'selected'}>days</option></select></div>
         <small>Used as the default countdown when you start a batch.</small></div>
-      <label class="field"><span>Infuse time as written (optional)</span><input name="infuseText" value="${esc(r.infuseText)}" placeholder="e.g. 4–6 weeks"></label>
+      <label class="field"><span>Infuse or steep time, as written (optional)</span><input name="infuseText" value="${esc(r.infuseText)}" placeholder="e.g. 4–6 weeks, or 5 min at 200°F"></label>
       <label class="field"><span>Yield</span><input name="yield" value="${esc(r.yield)}" placeholder="e.g. ~2 (60 ml) bottles"></label>
       <div class="field"><span>Ingredients &amp; ratios</span><div id="ings">${(r.ingredients.length ? r.ingredients : [{ name: '', amount: '' }]).map(ingRow).join('')}</div>
         <button type="button" class="btn ghost" data-add-ing>${ICONS.plus}Add ingredient</button></div>
@@ -1208,6 +1237,11 @@ function bindView() {
     else if (act === 'home-add-salve') batchForm('salve');
     else if (act === 'add-item') itemForm();
     else if (act === 'add-recipe') recipeForm();
+    else if (act === 'add-tea') recipeForm(null, 'tea');
+    else if (act === 'log-tea') {
+      const r = state.recipes.find(x => x.id === ui.recipeId);
+      itemForm(null, { name: r.name, type: 'tea' });
+    }
     else if (act === 'recipe-back') { ui.recipeId = null; render(); }
     else if (act === 'edit-recipe') recipeForm(state.recipes.find(r => r.id === ui.recipeId));
     else if (act === 'batch-from-recipe') {
@@ -1249,16 +1283,16 @@ function bindView() {
 async function loadPeople() {
   const box = $('#people-list');
   if (!box) return;
-  const { data, error } = await sb.from('studio_members').select('user_id, email, role').eq('studio_id', member.studioId).order('email');
+  const { data, error } = await sb.from('studio_members').select('*').eq('studio_id', member.studioId).order('email');
   if (error) { box.innerHTML = `<p class="form-error" style="padding:8px 14px">${navigator.onLine ? 'Couldn\'t load people.' : 'Connect to the internet to manage people.'}</p>`; return; }
   box.innerHTML = data.map(p => {
     const me = p.user_id === session.user.id;
     return `<div class="row person">
       <div class="label">${esc(p.email)}${me ? ' <small style="display:inline">(you)</small>' : ''}</div>
-      <select data-role-for="${p.user_id}" aria-label="Role for ${esc(p.email)}">
+      ${p.locked ? `<span class="locked-role">${ROLE_LABEL[p.role]} · Protected</span>` : `<select data-role-for="${p.user_id}" aria-label="Role for ${esc(p.email)}">
         ${['owner', 'editor', 'viewer'].map(r => `<option value="${r}" ${p.role === r ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`).join('')}
-      </select>
-      ${me ? '<span class="iconbtn-spacer"></span>' : `<button class="iconbtn" data-remove="${p.user_id}" data-email="${esc(p.email)}" aria-label="Remove ${esc(p.email)}">${ICONS.close}</button>`}
+      </select>`}
+      ${me || p.locked ? '<span class="iconbtn-spacer"></span>' : `<button class="iconbtn" data-remove="${p.user_id}" data-email="${esc(p.email)}" aria-label="Remove ${esc(p.email)}">${ICONS.close}</button>`}
     </div>`;
   }).join('');
 }
