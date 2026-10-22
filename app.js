@@ -680,7 +680,7 @@ function viewRecipe() {
   let body = '';
   if (t === 'details') {
     body = `<div class="facts">
-        <div class="fact">${ICONS.clock}<div><small>${isTea ? 'Steep time' : r.type === 'salve' ? 'Oil infuse time' : 'Infuse time'}</small><b>${esc(r.infuseText || fmtDuration(r.infuseDays))}</b></div></div>
+        <div class="fact">${ICONS.clock}<div><small>${isTea ? 'Brew time' : r.type === 'salve' ? 'Oil infuse time' : 'Infuse time'}</small><b>${esc(r.infuseText || fmtDuration(r.infuseDays))}</b></div></div>
         <div class="fact">${isTea ? ICONS.tea : ICONS.bottle}<div><small>${isTea ? 'Makes' : 'Yield'}</small><b>${esc(r.yield || '—')}</b></div></div>
       </div>
       ${r.steps.length ? `<h2 class="section-h">Steps</h2><ol class="steps">${r.steps.map(s => `<li><span>${esc(s)}</span></li>`).join('')}</ol>` : ''}`;
@@ -741,11 +741,11 @@ function recipeForm(existing, presetType = 'tincture') {
         </div></div>
       <label class="field"><span>Type</span><select name="type">${Object.entries(TYPE_LABEL).map(([v, l]) => `<option value="${v}" ${r.type === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="field"><span>Short description</span><input name="description" value="${esc(r.description)}" placeholder="What it's for"></label>
-      <div class="field"><span>Infuse time</span>
+      <div class="field" id="infuse-days" ${r.type === 'tea' ? 'hidden' : ''}><span>Infuse time</span>
         <div class="two"><input type="number" name="amount" min="0" value="${days ? (useWeeks ? days / 7 : days) : ''}" inputmode="numeric">
         <select name="unit"><option value="7" ${useWeeks ? 'selected' : ''}>weeks</option><option value="1" ${useWeeks ? '' : 'selected'}>days</option></select></div>
         <small>Used as the default countdown when you start a batch.</small></div>
-      <label class="field"><span>Infuse or steep time, as written (optional)</span><input name="infuseText" value="${esc(r.infuseText)}" placeholder="e.g. 4–6 weeks, or 5 min at 200°F"></label>
+      <label class="field"><span id="time-label">${r.type === 'tea' ? 'Brew time' : 'Infuse time as written (optional)'}</span><input name="infuseText" value="${esc(r.infuseText)}" placeholder="${r.type === 'tea' ? 'e.g. 5 min at 200°F' : 'e.g. 4–6 weeks'}"></label>
       <label class="field"><span>Yield</span><input name="yield" value="${esc(r.yield)}" placeholder="e.g. ~2 (60 ml) bottles"></label>
       <div class="field"><span>Ingredients &amp; ratios</span><div id="ings">${(r.ingredients.length ? r.ingredients : [{ name: '', amount: '' }]).map(ingRow).join('')}</div>
         <button type="button" class="btn ghost" data-add-ing>${ICONS.plus}Add ingredient</button></div>
@@ -756,6 +756,13 @@ function recipeForm(existing, presetType = 'tincture') {
     </form>`, sheet => {
     const form = $('#rf', sheet);
     const ings = $('#ings', sheet);
+    // Teas are brewed, not infused: no countdown, and "Brew time" wording.
+    form.type.addEventListener('change', () => {
+      const tea = form.type.value === 'tea';
+      $('#infuse-days', sheet).hidden = tea;
+      $('#time-label', sheet).textContent = tea ? 'Brew time' : 'Infuse time as written (optional)';
+      form.infuseText.placeholder = tea ? 'e.g. 5 min at 200°F' : 'e.g. 4–6 weeks';
+    });
     $('[data-add-ing]', sheet).onclick = () => { ings.insertAdjacentHTML('beforeend', ingRow()); ings.lastElementChild.querySelector('input').focus(); };
     ings.addEventListener('click', e => { const rm = e.target.closest('[data-rm]'); if (rm) rm.parentElement.remove(); });
     let photo = r.photo || '';
@@ -778,7 +785,7 @@ function recipeForm(existing, presetType = 'tincture') {
         name: form.name.value.trim(),
         type: form.type.value,
         description: form.description.value.trim(),
-        infuseDays: (Number(form.amount.value) || 0) * Number(form.unit.value),
+        infuseDays: form.type.value === 'tea' ? 0 : (Number(form.amount.value) || 0) * Number(form.unit.value),
         infuseText: form.infuseText.value.trim(),
         yield: form.yield.value.trim(),
         ingredients: $$('.ingrow', ings).map(row => ({ name: $('[data-ing=name]', row).value.trim(), amount: $('[data-ing=amount]', row).value.trim() })).filter(i => i.name),
