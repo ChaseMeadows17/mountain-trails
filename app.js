@@ -208,7 +208,7 @@ function render() {
   const who = $('#side-user');
   if (who) who.innerHTML = session ? `<b>${esc(session.user.user_metadata?.name || session.user.email)}</b><small>${member ? ROLE_LABEL[member.role] : ''}</small>` : '';
   const v = $('#view');
-  if (ui.tab === 'home') v.innerHTML = viewHome();
+  if (ui.tab === 'home') v.innerHTML = state.settings.homeStyle === 'classic' ? viewHome() : viewHomeNew();
   else if (ui.tab === 'infusing') v.innerHTML = viewBatches('tincture');
   else if (ui.tab === 'salves') v.innerHTML = viewBatches('salve');
   else if (ui.tab === 'inventory') v.innerHTML = viewInventory();
@@ -258,6 +258,154 @@ function whenText(left) {
   if (left < 7) return `In ${left} days`;
   if (left % 7 === 0) return `In ${plural(left / 7, 'week')}`;
   return `In ${left} days`;
+}
+
+/* ---------- New Home: Today card, shelf of jars, batch journey, two-week calendar ---------- */
+
+function viewHomeNew() {
+  const now = new Date();
+  const h = now.getHours();
+  const part = h >= 5 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'afternoon' : 'evening';
+  const name = session?.user?.user_metadata?.name;
+  const dateText = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  const batches = allBatches();
+  const ready = batches.filter(x => x.info.ready);
+  const infusing = batches.filter(x => !x.info.ready);
+  const toBottle = state.inventory.filter(needsBottling);
+  const toLabel = state.inventory.filter(needsLabel);
+  const finished = state.inventory.filter(isComplete);
+  const tabFor = list => TAB_FOR_TYPE[list[0]?.type] || 'inventory';
+  const goAttrs = (tab, filter) => `data-go="${tab}" ${filter && (tab === 'infusing' || tab === 'salves') ? `data-go-filter="${filter}"` : ''}`;
+  const preview = list => { const n = list.map(x => x.name || x.b.name); return n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3} more` : ''); };
+
+  // Today: the single most useful thing to do right now.
+  let card;
+  if (ready.length === 1) {
+    const x = ready[0];
+    card = { tone: 'ready', icon: ICONS.jar, title: `${x.b.name} is ready`,
+      sub: x.kind === 'tincture' ? 'Time to strain and bottle it.' : 'The oil is ready. Time to make the salve.',
+      btn: x.kind === 'tincture' ? 'Strain now' : 'Make salve', attrs: `data-open-batch="${x.b.id}" data-kind="${x.kind}"` };
+  } else if (ready.length > 1) {
+    const salvesOnly = ready.every(x => x.kind === 'salve');
+    card = { tone: 'ready', icon: ICONS.jar, title: `${ready.length} batches are ready`, sub: preview(ready),
+      btn: 'See them', attrs: goAttrs(salvesOnly ? 'salves' : 'infusing', 'ready') };
+  } else if (toBottle.length) {
+    card = { tone: 'todo', icon: ICONS.bottle, title: `${toBottle.length} ${toBottle.length === 1 ? 'batch' : 'batches'} to bottle`,
+      sub: preview(toBottle), btn: 'Start bottling', attrs: goAttrs(tabFor(toBottle), 'finish') };
+  } else if (toLabel.length) {
+    card = { tone: 'todo', icon: ICONS.tag, title: `${toLabel.length} ${toLabel.length === 1 ? 'batch' : 'batches'} to label`,
+      sub: preview(toLabel), btn: 'Start labeling', attrs: goAttrs(tabFor(toLabel), 'finish') };
+  } else {
+    const next = infusing[0];
+    card = { tone: 'calm', icon: ICONS.home, title: 'All caught up',
+      sub: next ? `Next up: ${next.b.name}, ${whenText(next.info.left).toLowerCase()}.` : 'Nothing infusing right now.',
+      btn: !next && canEdit('tinctures') ? 'Start a tincture' : '', attrs: 'data-act="home-add-tincture"' };
+  }
+  const also = [
+    ready.length && card.tone !== 'ready' ? `${ready.length} ready` : '',
+    toBottle.length && !card.title.includes('to bottle') ? `${toBottle.length} to bottle` : '',
+    toLabel.length && !card.title.includes('to label') ? `${toLabel.length} to label` : '',
+  ].filter(Boolean);
+
+  // The shelf: tinctures as amber bottles, salves as tins. Liquid level = how far along.
+  const jar = x => `<button class="jar ${x.info.ready ? 'is-ready' : ''}" data-open-batch="${x.b.id}" data-kind="${x.kind}" aria-label="${esc(x.b.name)}, ${esc(leftText(x.info))}">
+      <span class="jar-art">${x.kind === 'salve' ? tinArt() : bottleArt(x.info.pct)}</span>
+      <span class="jar-label"><b>${esc(x.b.name)}</b><small>${x.info.ready ? 'Ready' : x.info.left === 1 ? '1 day' : `${x.info.left} days`}</small></span>
+    </button>`;
+  const tinctureJars = batches.filter(x => x.kind === 'tincture');
+  const salveTins = batches.filter(x => x.kind === 'salve');
+  const shelfRow = (list, label) => list.length ? `<div class="shelf" aria-label="${label}"><div class="shelf-row">${list.map(jar).join('')}</div><div class="plank"></div></div>` : '';
+
+  // Journey: where every batch is in the process.
+  const steps = [
+    ['Infusing', infusing.length, goAttrs('infusing', 'infusing')],
+    ['Ready', ready.length, goAttrs(ready.length && ready.every(x => x.kind === 'salve') ? 'salves' : 'infusing', 'ready')],
+    ['To bottle', toBottle.length, goAttrs(tabFor(toBottle), 'finish')],
+    ['To label', toLabel.length, goAttrs(tabFor(toLabel), 'finish')],
+    ['Finished', finished.length, 'data-go="inventory"'],
+  ];
+
+  // Two weeks ahead, with a dot on each day something comes ready.
+  const days = Array.from({ length: 14 }, (_, i) => addDays(today(), i));
+  const cal = days.map((d, i) => {
+    const due = batches.filter(x => x.b.ready === d);
+    const dt = parseDate(d);
+    const attrs = due.length === 1 ? `data-open-batch="${due[0].b.id}" data-kind="${due[0].kind}"` : due.length ? goAttrs('infusing', 'all') : '';
+    const title = due.length ? `${dt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}: ${due.map(x => x.b.name).join(', ')}` : '';
+    return `<button class="cal-day ${i === 0 ? 'today' : ''} ${due.length ? 'has' : ''}" ${attrs} ${due.length ? '' : 'tabindex="-1"'} title="${esc(title)}">
+      <span>${dt.toLocaleDateString(undefined, { weekday: 'narrow' })}</span><b>${dt.getDate()}</b>
+      <i>${due.length > 1 ? due.length : due.length ? '' : ''}</i></button>`;
+  }).join('');
+  const nextDue = batches.filter(x => !x.info.ready && x.info.left <= 13);
+  const calNote = nextDue.length
+    ? nextDue.slice(0, 3).map(x => `<b>${esc(x.b.name)}</b> ${parseDate(x.b.ready).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}`).join(' · ')
+    : 'Nothing comes ready in the next two weeks.';
+
+  const recent = finished.sort((a, z) => (z.date || '').localeCompare(a.date || '')).slice(0, 4);
+
+  return `<div class="home2 ${part}">
+    <header class="h2-head">
+      <div>
+        <p class="h2-date">${dateText}</p>
+        <h1 class="h2-greet">Good ${part}${name ? `, ${esc(name)}` : ''}</h1>
+      </div>
+      <button class="iconbtn gear phone-only" data-go="settings" aria-label="Settings">${ICONS.gear}</button>
+    </header>
+
+    <section class="today-card ${card.tone}">
+      <span class="today-ico">${card.icon}</span>
+      <div class="today-text"><b>${esc(card.title)}</b><span>${esc(card.sub)}</span>
+        ${also.length ? `<small>Also: ${also.join(' · ')}</small>` : ''}</div>
+      ${card.btn ? `<button class="btn ${card.tone === 'ready' ? '' : 'ghost'}" ${card.attrs}>${esc(card.btn)}</button>` : ''}
+    </section>
+
+    <section class="shelf-wrap">
+      <div class="h2-sec"><h2>On the shelf</h2><button class="linkbtn" data-go="infusing">All tinctures</button></div>
+      ${tinctureJars.length || salveTins.length
+        ? shelfRow(tinctureJars, 'Tinctures') + shelfRow(salveTins, 'Salves')
+        : `<div class="shelf empty-shelf"><p>The shelf is empty. ${canEdit('tinctures') ? 'Start a tincture to see it here.' : ''}</p><div class="plank"></div></div>`}
+    </section>
+
+    <div class="h2-grid">
+      <section class="panel journey-card">
+        <h2>Batch journey</h2>
+        <div class="journey">${steps.map(([label, n, attrs], i) => `${i ? '<span class="j-arrow" aria-hidden="true">›</span>' : ''}
+          <button class="j-step ${n ? 'on' : ''}" ${attrs}><b>${n}</b><span>${label}</span></button>`).join('')}</div>
+      </section>
+
+      <section class="panel cal-card">
+        <h2>Next two weeks</h2>
+        <div class="cal">${cal}</div>
+        <p class="cal-note">${calNote}</p>
+      </section>
+
+      ${recent.length ? `<section class="panel recent-card">
+        <div class="h2-sec"><h2>Recently finished</h2><button class="linkbtn" data-go="inventory">See all</button></div>
+        <div class="recent-row">${recent.map(i => `<button class="recent-item" data-open-item="${i.id}">
+          <span class="thumb">${inventoryArt(i.type)}</span><b>${esc(i.name)}</b><small>${fmtDate(i.date)}${i.qty != null ? ` · ${i.qty} made` : ''}</small></button>`).join('')}</div>
+      </section>` : ''}
+    </div>
+
+    ${canEdit('tinctures') ? `<button class="home-fab" data-act="home-add" aria-label="Start something new">${ICONS.plus}</button>` : ''}
+  </div>`;
+}
+
+// The floating + on the new Home: pick what to start.
+function addChooser() {
+  openSheet(`
+    <div class="sheet-head"><h2>Start something</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
+    <div class="chooser">
+      <button class="btn block" data-new="tincture">${ICONS.bottle}New tincture</button>
+      <button class="btn block ghost" data-new="salve">${ICONS.tin}New salve</button>
+      ${canEdit('recipes') ? `<button class="btn block ghost" data-new="tea">${ICONS.tea}New tea blend</button>` : ''}
+    </div>`, sheet => {
+    sheet.addEventListener('click', e => {
+      const b = e.target.closest('[data-new]');
+      if (!b) return;
+      if (b.dataset.new === 'tea') recipeForm(null, 'tea'); else batchForm(b.dataset.new);
+    });
+  });
 }
 
 function viewHome() {
@@ -340,10 +488,10 @@ function viewHome() {
     </div>
 
     <div class="home-grid">
-    <section class="panel att">
+    ${attention ? `<section class="panel att">
       <h2>Needs attention</h2>
-      ${attention || `<p class="caught">${ICONS.jar}<span>All caught up. Nothing to strain, bottle or label.</span></p>`}
-    </section>
+      ${attention}
+    </section>` : ''}
 
     <section class="panel com">
       <h2>Coming up</h2>
@@ -925,6 +1073,11 @@ function viewSettings() {
       ${toggle('shakeReminders', 'Daily shake reminders', 'Show a "shaken today" check on each infusing jar.')}
     </section>
     <section class="group"><h2>App</h2>
+      <div class="row"><div class="label">Home style<small>Try the new Home, or switch back to the classic one. Just changes this device.</small></div>
+        <select id="home-style" class="name-input" aria-label="Home style">
+          <option value="new" ${s.homeStyle !== 'classic' ? 'selected' : ''}>New</option>
+          <option value="classic" ${s.homeStyle === 'classic' ? 'selected' : ''}>Classic</option>
+        </select></div>
       <div class="row"><div class="label">Get the latest version<small>Reloads the app with any new updates. Your data and sign-in stay as they are.</small></div>
         <button class="btn ghost" data-act="refresh-app" style="min-height:40px">Update</button></div>
     </section>
@@ -1385,6 +1538,7 @@ function bindView() {
     if (act === 'add-batch') batchForm(kindForTab());
     else if (act === 'home-add-tincture') batchForm('tincture');
     else if (act === 'home-add-salve') batchForm('salve');
+    else if (act === 'home-add') addChooser();
     else if (act === 'add-item') itemForm();
     else if (act === 'add-recipe') recipeForm();
     else if (act === 'add-tea') recipeForm(null, 'tea');
@@ -1427,6 +1581,12 @@ function bindView() {
   const imp = $('#import', v);
   if (imp) imp.onchange = () => { if (imp.files[0]) importData(imp.files[0]); imp.value = ''; };
   if ($('#people-list', v)) bindPeople(v);
+  const homeStyle = $('#home-style', v);
+  if (homeStyle) homeStyle.onchange = () => {
+    state.settings.homeStyle = homeStyle.value;
+    save();
+    toast(homeStyle.value === 'classic' ? 'Classic Home is back.' : 'Trying the new Home.');
+  };
   const myName = $('#my-name', v);
   if (myName) myName.onchange = async () => {
     const name = myName.value.trim();
