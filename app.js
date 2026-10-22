@@ -200,7 +200,14 @@ function render() {
   bindView();
 }
 
+// Which collection an "add" button writes to, so it can be hidden for people who can't.
+function actAllowed(act) {
+  const coll = { 'add-item': 'inventory', 'add-recipe': 'recipes', 'add-batch': ui.tab === 'salves' ? 'salves' : 'tinctures' }[act];
+  return !coll || canEdit(coll);
+}
+
 function pageHead(art, title, sub, addAction) {
+  if (addAction && !actAllowed(addAction)) addAction = null;
   return `<header class="page-head">
     <div class="art">${art}</div>
     <div><h1>${title}</h1><p>${sub}</p></div>
@@ -214,6 +221,7 @@ function chips(group, options) {
 }
 
 function emptyState(title, text, act, btn) {
+  if (act && !actAllowed(act)) act = null;
   return `<div class="empty">${sprigArt(title, 70, 70)}<h3>${title}</h3><p>${text}</p>
     ${act ? `<button class="btn" data-act="${act}">${ICONS.plus}${btn}</button>` : ''}</div>`;
 }
@@ -318,10 +326,10 @@ function viewHome() {
       <button class="linkbtn" data-go="inventory">See everything finished</button>
     </section>` : ''}
 
-    <div class="btnrow">
+    ${canEdit('tinctures') ? `<div class="btnrow">
       <button class="btn" data-act="home-add-tincture">${ICONS.plus}New tincture</button>
       <button class="btn ghost" data-act="home-add-salve">${ICONS.plus}New salve</button>
-    </div>`;
+    </div>` : ''}`;
 }
 
 /* ================= Infusing & Salves ================= */
@@ -487,11 +495,12 @@ function batchDetail(kind, id) {
       ${recipe ? `<dt>Recipe</dt><dd>${esc(recipe.name)}</dd>` : ''}
     </dl>
     ${b.notes ? `<div class="note-box">${esc(b.notes)}</div>` : ''}
-    <button class="btn block ${info.ready ? '' : 'ghost'}" data-finish style="margin-top:14px">${ICONS.jar}${k.finishBtn}</button>
+    ${canEdit(k.list) ? `<button class="btn block ${info.ready ? '' : 'ghost'}" data-finish style="margin-top:14px">${ICONS.jar}${k.finishBtn}</button>
     <div class="btnrow">
       <button class="btn ghost" data-edit>Edit</button>
       <button class="btn danger" data-delete>Delete</button>
-    </div>`, sheet => {
+    </div>` : ''}`, sheet => {
+    if (!canEdit(k.list)) return;
     $('[data-edit]', sheet).onclick = () => batchForm(kind, b);
     $('[data-finish]', sheet).onclick = () => finishForm(kind, b);
     $('[data-delete]', sheet).onclick = () => {
@@ -570,7 +579,7 @@ function viewInventory() {
 function itemForm(existing) {
   const i = existing || { name: '', type: 'tincture', size: '', qty: null, date: today(), started: '', notes: '' };
   openSheet(`
-    <div class="sheet-head"><h2>${existing ? 'Edit finished batch' : 'Add finished batch'}</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
+    <div class="sheet-head"><h2>${!canEdit('inventory') ? 'Finished batch' : existing ? 'Edit finished batch' : 'Add finished batch'}</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
     <form id="if">
       <label class="field"><span>Name</span><input name="name" required value="${esc(i.name)}"></label>
       <div class="two">
@@ -587,6 +596,11 @@ function itemForm(existing) {
       ${existing ? '<button class="btn danger block" type="button" data-delete style="margin-top:10px">Delete</button>' : ''}
     </form>`, sheet => {
     const form = $('#if', sheet);
+    if (!canEdit('inventory')) { // viewers can look but not change
+      $$('input, select, textarea', form).forEach(el => { el.disabled = true; });
+      $$('button', form).forEach(el => el.remove());
+      return;
+    }
     form.addEventListener('submit', e => {
       e.preventDefault();
       const data = {
@@ -651,14 +665,14 @@ function viewRecipe() {
   }
   return `
     <div class="backbar"><button class="iconbtn" data-act="recipe-back" aria-label="Back to recipes">${ICONS.back}</button>
-      <button class="btn ghost" data-act="edit-recipe" style="min-height:40px">Edit</button></div>
+      ${canEdit('recipes') ? '<button class="btn ghost" data-act="edit-recipe" style="min-height:40px">Edit</button>' : ''}</div>
     <div class="recipe-hero">${r.photo ? `<img class="hero-photo" src="${r.photo}" alt="">` : mountainArt()}
       <h1>${esc(r.name)}</h1><div class="kind">${TYPE_LABEL[r.type]}</div>
       ${r.description ? `<p class="desc">${esc(r.description)}</p>` : ''}</div>
     <div class="seg">${[['details', 'Details'], ['ingredients', 'Ingredients'], ['notes', 'Notes']].map(([v, l]) =>
       `<button data-rtab="${v}" aria-pressed="${t === v}">${l}</button>`).join('')}</div>
     ${body}
-    ${canBatch ? `<button class="btn block" data-act="batch-from-recipe">${ICONS.plus}Start a ${r.type === 'salve' ? 'salve batch' : 'tincture'} from this recipe</button>` : ''}`;
+    ${canBatch && canEdit(r.type === 'salve' ? 'salves' : 'tinctures') ? `<button class="btn block" data-act="batch-from-recipe">${ICONS.plus}Start a ${r.type === 'salve' ? 'salve batch' : 'tincture'} from this recipe</button>` : ''}`;
 }
 
 // Center-crops a picture to a small square JPEG so many recipes fit in phone storage.
@@ -773,11 +787,23 @@ function viewSettings() {
     <header class="page-head"><div class="art" style="color:var(--forest)">${ICONS.gear}</div><div><h1>Settings</h1><p>Reminders and backups.</p></div><span></span></header>
     <div class="rule"></div>
     <section class="group"><h2>Account</h2>
-      <div class="row"><div class="label">Signed in<small>${esc(session?.user?.email || 'Not signed in')}</small></div>
+      <div class="row"><div class="label">Signed in${member ? ` · ${ROLE_LABEL[member.role]}` : ''}<small>${esc(session?.user?.email || 'Not signed in')}</small></div>
         <button class="btn ghost" data-act="sign-out" style="min-height:40px">Sign out</button></div>
       <div class="row"><div class="label">Cloud backup<small id="sync-status">${esc(syncText())}</small></div>
         <button class="btn ghost" data-act="sync-now" style="min-height:40px">Sync now</button></div>
     </section>
+    ${member?.role === 'owner' ? `<section class="group"><h2>People</h2>
+      <div id="people-list"><p class="fineprint" style="padding:8px 14px">Loading…</p></div>
+      <form id="add-person" class="add-person">
+        <div class="label">Add someone<small>Create their login in Supabase first (Authentication → Users → Add user), then add their email here.</small></div>
+        <input type="email" name="email" placeholder="their@email.com" required aria-label="Their email">
+        <div class="two">
+          <select name="role" aria-label="Role"><option value="editor">Editor</option><option value="viewer">Viewer</option><option value="owner">Owner</option></select>
+          <button class="btn" type="submit">Add</button>
+        </div>
+        <p class="role-help"><b>Owner:</b> everything, plus managing people. <b>Editor:</b> everything except changing recipes. <b>Viewer:</b> can look, can't change.</p>
+      </form>
+    </section>` : ''}
     <section class="group"><h2>Reminders</h2>
       ${toggle('notifications', 'Phone notifications', permNote)}
       ${toggle('shakeReminders', 'Daily shake reminders', 'Show a "shaken today" check on each infusing jar.')}
@@ -785,8 +811,8 @@ function viewSettings() {
     <section class="group"><h2>Backup file</h2>
       <div class="row"><div class="label">Save a backup<small>Everything is already saved to your account. This makes an extra copy as a file.</small></div>
         <button class="btn ghost" data-act="export" style="min-height:40px">Save</button></div>
-      <div class="row"><div class="label">Load a file<small>Restore a backup, or add items from a file someone sends you.</small></div>
-        <label class="btn ghost" style="min-height:40px">Load<input type="file" accept="application/json,.json" id="import" hidden></label></div>
+      ${canEdit('tinctures') ? `<div class="row"><div class="label">Load a file<small>Restore a backup, or add items from a file someone sends you.</small></div>
+        <label class="btn ghost" style="min-height:40px">Load<input type="file" accept="application/json,.json" id="import" hidden></label></div>` : ''}
     </section>
     <p class="fineprint">${state.tinctures.length} tinctures · ${state.salves.length} salves · ${state.inventory.length} finished · ${state.recipes.length} recipes</p>`;
 }
@@ -804,13 +830,23 @@ let session = null;
 let syncTimer = null;
 let syncing = false;
 let syncState = 'idle'; // idle | saving | offline | error
+const MEMBER_KEY = 'mtws-member-v1';
+let member = (() => { try { return JSON.parse(localStorage.getItem(MEMBER_KEY)); } catch (e) { return null; } })(); // { studioId, role }
+
+const ROLE_LABEL = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' };
+
+// Mirrors the database rules: owners change anything, editors everything but recipes, viewers nothing.
+function canEdit(collection) {
+  if (!member) return !sb; // no account set up (offline fallback): allow local edits
+  return member.role === 'owner' || (member.role === 'editor' && collection !== 'recipes');
+}
 
 function syncText() {
   if (!sb) return 'Offline. Changes are saved on this phone and will upload later.';
   if (syncState === 'saving') return 'Saving…';
   if (syncState === 'offline') return 'Offline. Changes will upload when you\'re back online.';
   if (syncState === 'error') return 'Couldn\'t reach your account. Will try again.';
-  return pendingChanges().count ? 'Waiting to upload changes…' : 'All changes saved to your account.';
+  return pendingChanges().count ? 'Waiting to upload changes…' : 'All changes saved to the studio.';
 }
 
 function setSyncState(s) {
@@ -837,8 +873,9 @@ function currentMap() {
 
 function pendingChanges() {
   const synced = loadSynced(), now = currentMap();
-  const changed = Object.keys(now).filter(k => synced[k] !== now[k]);
-  const removed = Object.keys(synced).filter(k => !(k in now));
+  const allowed = k => canEdit(k.slice(0, k.indexOf('/')));
+  const changed = Object.keys(now).filter(k => synced[k] !== now[k] && allowed(k));
+  const removed = Object.keys(synced).filter(k => !(k in now) && allowed(k));
   return { changed, removed, now, count: changed.length + removed.length };
 }
 
@@ -849,7 +886,7 @@ function scheduleSync() {
 
 // Uploads anything added or changed since the last sync, and removes deleted items.
 async function pushChanges() {
-  if (!sb || !session || syncing) return false;
+  if (!sb || !session || !member || syncing) return false;
   const { changed, removed, now } = pendingChanges();
   if (!changed.length && !removed.length) { setSyncState('idle'); return true; }
   if (!navigator.onLine) { setSyncState('offline'); return false; }
@@ -859,16 +896,16 @@ async function pushChanges() {
     const stamp = new Date().toISOString();
     const rows = changed.map(k => {
       const [collection, id] = [k.slice(0, k.indexOf('/')), k.slice(k.indexOf('/') + 1)];
-      return { user_id: session.user.id, collection, id, data: state[collection].find(x => x.id === id), updated_at: stamp };
+      return { studio_id: member.studioId, collection, id, data: state[collection].find(x => x.id === id), updated_at: stamp };
     });
     for (let i = 0; i < rows.length; i += 200) {
-      const { error } = await sb.from(TABLE).upsert(rows.slice(i, i + 200), { onConflict: 'user_id,collection,id' });
+      const { error } = await sb.from(TABLE).upsert(rows.slice(i, i + 200), { onConflict: 'studio_id,collection,id' });
       if (error) throw error;
     }
     for (const c of COLLECTIONS) {
       const ids = removed.filter(k => k.startsWith(c + '/')).map(k => k.slice(c.length + 1));
       if (!ids.length) continue;
-      const { error } = await sb.from(TABLE).delete().eq('collection', c).in('id', ids);
+      const { error } = await sb.from(TABLE).delete().eq('studio_id', member.studioId).eq('collection', c).in('id', ids);
       if (error) throw error;
     }
     const synced = loadSynced();
@@ -889,16 +926,17 @@ async function pushChanges() {
 // Uploads local changes first, then replaces local data with what's in her account
 // (so edits made on another device show up here).
 async function pullChanges() {
-  if (!sb || !session) return;
+  if (!sb || !session || !member) return;
   if (!(await pushChanges())) return;
   try {
-    const { data, error } = await sb.from(TABLE).select('collection,id,data').limit(5000);
+    const { data, error } = await sb.from(TABLE).select('collection,id,data').eq('studio_id', member.studioId).limit(5000);
     if (error) throw error;
     if (pendingChanges().count) return; // she edited something mid-download; next sync catches up
     const fresh = Object.fromEntries(COLLECTIONS.map(c => [c, []]));
     for (const row of data) if (fresh[row.collection]) fresh[row.collection].push(row.data);
     Object.assign(state, fresh);
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* cache only */ }
+    // Anything this person can't change is now exactly what's in the studio.
     storeSynced(currentMap());
     setSyncState('idle');
     if (!$('#sheet-root').firstChild && !document.activeElement?.matches('input, textarea, select')) render();
@@ -971,12 +1009,49 @@ async function signOut() {
   await sb?.auth.signOut();
   localStorage.removeItem(STORE_KEY);
   localStorage.removeItem(SYNCED_KEY);
+  localStorage.removeItem(MEMBER_KEY);
   state = defaultState();
   session = null;
+  member = null;
   showSignIn();
 }
 
-function enterApp() {
+// Finds which studio this login belongs to and with what role. Uses the last known
+// answer when offline.
+async function loadMembership() {
+  if (!sb || !session) return member;
+  try {
+    const { data, error } = await sb.from('studio_members').select('studio_id, role').eq('user_id', session.user.id).limit(1);
+    if (error) throw error;
+    const m = data[0];
+    if (member && (!m || m.studio_id !== member.studioId)) {
+      // Removed from the studio, or moved: drop what's cached on this phone.
+      localStorage.removeItem(STORE_KEY); localStorage.removeItem(SYNCED_KEY);
+      state = { ...defaultState(), settings: state.settings };
+    }
+    member = m ? { studioId: m.studio_id, role: m.role } : null;
+    if (member) localStorage.setItem(MEMBER_KEY, JSON.stringify(member)); else localStorage.removeItem(MEMBER_KEY);
+  } catch (e) { /* offline: keep the cached membership */ }
+  return member;
+}
+
+function showNotMember() {
+  document.body.classList.add('signed-out');
+  $('#view').innerHTML = `
+    <div class="signin">
+      <img class="home-logo" src="icons/logo.png" alt="Mountain Trails Wellness Studio">
+      <div class="rule"></div>
+      <h1>Almost there</h1>
+      <p class="fineprint">You're signed in as <b>${esc(session?.user?.email || '')}</b>, but you haven't been added to the studio yet. Ask an owner to add you in Settings → People.</p>
+      <button class="btn block" id="retry-member" style="margin-top:16px">Check again</button>
+      <button class="linkbtn" id="nm-signout">Sign out</button>
+    </div>`;
+  $('#retry-member').onclick = () => enterApp();
+  $('#nm-signout').onclick = async () => { await sb?.auth.signOut(); session = null; showSignIn(); };
+}
+
+async function enterApp() {
+  if (sb && session && !(await loadMembership())) return showNotMember();
   document.body.classList.remove('signed-out');
   ui.tab = 'home';
   render();
@@ -1166,6 +1241,51 @@ function bindView() {
   });
   const imp = $('#import', v);
   if (imp) imp.onchange = () => { if (imp.files[0]) importData(imp.files[0]); imp.value = ''; };
+  if ($('#people-list', v)) bindPeople(v);
+}
+
+/* ---------- People (owners only) ---------- */
+
+async function loadPeople() {
+  const box = $('#people-list');
+  if (!box) return;
+  const { data, error } = await sb.from('studio_members').select('user_id, email, role').eq('studio_id', member.studioId).order('email');
+  if (error) { box.innerHTML = `<p class="form-error" style="padding:8px 14px">${navigator.onLine ? 'Couldn\'t load people.' : 'Connect to the internet to manage people.'}</p>`; return; }
+  box.innerHTML = data.map(p => {
+    const me = p.user_id === session.user.id;
+    return `<div class="row person">
+      <div class="label">${esc(p.email)}${me ? ' <small style="display:inline">(you)</small>' : ''}</div>
+      <select data-role-for="${p.user_id}" aria-label="Role for ${esc(p.email)}">
+        ${['owner', 'editor', 'viewer'].map(r => `<option value="${r}" ${p.role === r ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`).join('')}
+      </select>
+      ${me ? '<span class="iconbtn-spacer"></span>' : `<button class="iconbtn" data-remove="${p.user_id}" data-email="${esc(p.email)}" aria-label="Remove ${esc(p.email)}">${ICONS.close}</button>`}
+    </div>`;
+  }).join('');
+}
+
+function bindPeople(v) {
+  loadPeople();
+  const rpc = async (fn, args, ok) => {
+    const { error } = await sb.rpc(fn, args);
+    if (error) toast(navigator.onLine ? error.message || 'That didn\'t work. Try again.' : 'Connect to the internet to manage people.');
+    else if (ok) toast(ok);
+    if (fn === 'set_member_role' && args.p_user === session.user.id) { await loadMembership(); render(); return !error; }
+    loadPeople();
+    return !error;
+  };
+  $('#people-list', v).addEventListener('change', e => {
+    const sel = e.target.closest('[data-role-for]');
+    if (sel) rpc('set_member_role', { p_user: sel.dataset.roleFor, p_role: sel.value }, 'Role updated');
+  });
+  $('#people-list', v).addEventListener('click', e => {
+    const btn = e.target.closest('[data-remove]');
+    if (btn && confirm(`Remove ${btn.dataset.email} from the studio? They'll lose access right away.`)) rpc('remove_member', { p_user: btn.dataset.remove }, 'Removed');
+  });
+  $('#add-person', v).addEventListener('submit', e => {
+    e.preventDefault();
+    const f = e.target;
+    rpc('add_member', { p_email: f.email.value.trim(), p_role: f.role.value }, `Added ${f.email.value.trim()}`).then(ok => { if (ok) f.reset(); });
+  });
 }
 
 function rerenderKeepingFocus(sel) {
@@ -1210,6 +1330,10 @@ document.addEventListener('visibilitychange', () => {
   pullChanges();
 });
 window.addEventListener('online', () => pullChanges());
+// Others in the studio may be making changes too; check every minute while the app is open.
+setInterval(() => {
+  if (document.visibilityState === 'visible' && !document.body.classList.contains('signed-out')) loadMembership().then(m => m ? pullChanges() : showNotMember());
+}, 60 * 1000);
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
