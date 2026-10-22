@@ -1210,12 +1210,18 @@ async function pullChanges() {
     if (pendingChanges().count) return; // she edited something mid-download; next sync catches up
     const fresh = Object.fromEntries(COLLECTIONS.map(c => [c, []]));
     for (const row of data) if (fresh[row.collection]) fresh[row.collection].push(row.data);
-    Object.assign(state, fresh);
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* cache only */ }
+    // Nothing new from the studio: leave the screen alone (redrawing every minute looks like a flicker).
+    const before = currentMap();
+    const changed = Object.keys(before).length !== data.length
+      || COLLECTIONS.some(c => fresh[c].some(item => before[`${c}/${item.id}`] !== hash(JSON.stringify(item))));
+    if (changed) {
+      Object.assign(state, fresh);
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* cache only */ }
+    }
     // Anything this person can't change is now exactly what's in the studio.
     storeSynced(currentMap());
     setSyncState('idle');
-    if (!$('#sheet-root').firstChild && !document.activeElement?.matches('input, textarea, select')) render();
+    if (changed && !$('#sheet-root').firstChild && !document.activeElement?.matches('input, textarea, select')) render();
   } catch (e) {
     setSyncState(navigator.onLine ? 'error' : 'offline');
   }
@@ -1768,7 +1774,13 @@ async function boot() {
 }
 
 boot();
-setInterval(() => { if (document.body.classList.contains('signed-out')) return; render(); checkReminders(); }, 60 * 60 * 1000);
+// Countdowns only change at midnight, so redraw then (checked hourly), not on a timer.
+let renderedDay = today();
+setInterval(() => {
+  if (document.body.classList.contains('signed-out')) return;
+  checkReminders();
+  if (today() !== renderedDay && !$('#sheet-root').firstChild) { renderedDay = today(); render(); }
+}, 60 * 60 * 1000);
 // Coming back to the app after a minute or more counts as opening it again.
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
