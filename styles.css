@@ -613,10 +613,11 @@ button { cursor: pointer; }
 .shelf { position: relative; padding: 6px 4px 0; }
 .shelf-row { display: flex; gap: 6px; overflow-x: auto; padding: 4px 4px 0; scroll-snap-type: x proximity; scrollbar-width: none; align-items: flex-end; }
 .shelf-row::-webkit-scrollbar { display: none; }
+/* A quiet parchment ledge, so the jars stay the focus. */
 .plank {
-  height: 16px; margin: -2px -4px 14px; border-radius: 3px;
-  background: linear-gradient(#9A6B3E, #7A5130 55%, #5E3D23);
-  box-shadow: 0 6px 10px -4px rgba(62,47,31,.45), inset 0 1px 0 rgba(255,235,200,.35);
+  height: 5px; margin: 0 0 14px; border-radius: 3px;
+  background: linear-gradient(var(--parchment-3), #D8C49F);
+  box-shadow: 0 3px 6px -3px rgba(62,47,31,.18);
 }
 .jar {
   flex: none; width: 84px; scroll-snap-align: start;
