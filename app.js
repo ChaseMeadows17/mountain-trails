@@ -208,7 +208,7 @@ function render() {
   const who = $('#side-user');
   if (who) who.innerHTML = session ? `<b>${esc(session.user.user_metadata?.name || session.user.email)}</b><small>${member ? ROLE_LABEL[member.role] : ''}</small>` : '';
   const v = $('#view');
-  if (ui.tab === 'home') v.innerHTML = state.settings.homeStyle === 'classic' ? viewHome() : viewHomeNew();
+  if (ui.tab === 'home') v.innerHTML = state.settings.homeStyle === 'new' ? viewHomeNew() : viewHome();
   else if (ui.tab === 'infusing') v.innerHTML = viewBatches('tincture');
   else if (ui.tab === 'salves') v.innerHTML = viewBatches('salve');
   else if (ui.tab === 'inventory') v.innerHTML = viewInventory();
@@ -1075,8 +1075,8 @@ function viewSettings() {
     <section class="group"><h2>App</h2>
       <div class="row"><div class="label">Home style<small>Try the new Home, or switch back to the classic one. Just changes this device.</small></div>
         <select id="home-style" class="name-input" aria-label="Home style">
-          <option value="new" ${s.homeStyle !== 'classic' ? 'selected' : ''}>New</option>
-          <option value="classic" ${s.homeStyle === 'classic' ? 'selected' : ''}>Classic</option>
+          <option value="new" ${s.homeStyle === 'new' ? 'selected' : ''}>New</option>
+          <option value="classic" ${s.homeStyle !== 'new' ? 'selected' : ''}>Classic</option>
         </select></div>
       <div class="row"><div class="label">Get the latest version<small>Reloads the app with any new updates. Your data and sign-in stay as they are.</small></div>
         <button class="btn ghost" data-act="refresh-app" style="min-height:40px">Update</button></div>

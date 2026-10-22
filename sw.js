@@ -1,5 +1,5 @@
 ﻿// Offline support: use the network when available (so updates show up right away), fall back to cache offline.
-const CACHE = 'mtws-apothecary-v20';
+const CACHE = 'mtws-apothecary-v21';
 const SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'logo-art.js', 'app.js', 'manifest.webmanifest',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/logo.png',
