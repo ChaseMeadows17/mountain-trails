@@ -170,6 +170,9 @@ button { cursor: pointer; }
   background: rgba(155,174,130,.3); color: var(--forest); border: 1px solid rgba(46,75,50,.2);
   margin: 4px 0 2px;
 }
+.to-finish-h { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
+.to-finish-h .count { font-family: var(--serif-body); font-size: 13px; font-weight: 600; background: var(--amber-soft); border: 1px solid var(--amber); border-radius: 999px; padding: 1px 10px; }
+.fineprint.to-finish-note { text-align: left; margin: 0 0 12px; }
 .checks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .check-chip {
   display: inline-flex; align-items: center; gap: 6px;

@@ -271,7 +271,7 @@ function viewHome() {
   const upcoming = batches.filter(x => !x.info.ready);
   const infusingCount = state.tinctures.filter(b => !batchInfo(b).ready).length;
   const month = today().slice(0, 7);
-  const finishedMonth = state.inventory.filter(i => (i.date || '').startsWith(month)).length;
+  const finishedMonth = state.inventory.filter(i => isComplete(i) && (i.date || '').startsWith(month)).length;
   const shakeNeed = state.settings.shakeReminders
     ? state.tinctures.filter(b => !batchInfo(b).ready && state.shaken[b.id] !== today()).length : 0;
 
@@ -283,7 +283,8 @@ function viewHome() {
     if (!list.length) return '';
     const names = list.map(i => i.name);
     const preview = names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3} more` : '');
-    return `<button class="hrow" data-go="inventory" data-go-todo="${todo}">
+    const tab = TAB_FOR_TYPE[list[0].type] || 'inventory';
+    return `<button class="hrow" data-go="${tab}" ${tab === 'infusing' || tab === 'salves' ? 'data-go-filter="finish"' : ''}>
         <span class="hico todo">${icon}</span>
         <span><b>${list.length} ${list.length === 1 ? 'batch' : 'batches'} ${what}</b><small>${esc(preview)}</small></span>
         <span class="chev">${ICONS.chev}</span></button>`;
@@ -321,7 +322,7 @@ function viewHome() {
       </div></li>`;
   }).join('');
 
-  const recent = [...state.inventory].sort((a, z) => (z.date || '').localeCompare(a.date || '')).slice(0, 3);
+  const recent = state.inventory.filter(isComplete).sort((a, z) => (z.date || '').localeCompare(a.date || '')).slice(0, 3);
 
   return `
     <header class="home-head">
@@ -381,14 +382,16 @@ function viewBatches(kind) {
   const k = KIND[kind];
   const all = sortedBatches(kind);
   const readyCount = all.filter(b => batchInfo(b).ready).length;
+  const pending = stillToFinish(kind);
+  if (ui.filters[k.filterKey] === 'finish' && !pending.length) ui.filters[k.filterKey] = 'all'; // all done
   const f = ui.filters[k.filterKey];
-  const shown = all.filter(b => f === 'all' || (f === 'ready') === batchInfo(b).ready);
+  const shown = f === 'finish' ? [] : all.filter(b => f === 'all' || (f === 'ready') === batchInfo(b).ready);
 
   const head = kind === 'tincture'
     ? pageHead(sprigArt('lavender', 56, 56), 'Tinctures', 'Track your tinctures and never miss a harvest.', 'add-batch')
     : pageHead(sprigArt('calendula', 56, 56), 'Salves', 'Track your salve batches from start to finish.', 'add-batch');
 
-  if (!all.length) {
+  if (!all.length && !pending.length) {
     return head + (kind === 'tincture'
       ? emptyState('No jars infusing yet', 'Add a tincture when you set a jar on the shelf. You\'ll see a countdown, and a reminder a week before it\'s ready.', 'add-batch', 'Start a tincture')
       : emptyState('No salves in progress', 'Start a batch when you set your herbs infusing in oil. When the oil is ready, make the salve and it moves to Finished.', 'add-batch', 'Start a salve'));
@@ -401,11 +404,13 @@ function viewBatches(kind) {
   }
 
   const cards = shown.map(b => batchCard(kind, b)).join('') ||
-    `<p class="fineprint">Nothing here right now.</p>`;
+    (f === 'finish' ? '' : `<p class="fineprint">Nothing ${f === 'all' ? 'infusing' : 'here'} right now.</p>`);
 
   return head +
-    chips(k.filterKey, [['all', `All (${all.length})`], ['infusing', `${k.infusingLabel} (${all.length - readyCount})`], ['ready', `Ready (${readyCount})`]]) +
-    shakeNote + `<div class="list">${cards}</div>`;
+    chips(k.filterKey, [['all', `All (${all.length + pending.length})`], ['infusing', `${k.infusingLabel} (${all.length - readyCount})`], ['ready', `Ready (${readyCount})`],
+      ...(pending.length ? [['finish', `To bottle &amp; label (${pending.length})`]] : [])]) +
+    shakeNote + (cards ? `<div class="list">${cards}</div>` : '') +
+    (f === 'all' || f === 'finish' ? toFinishSection(kind) : '');
 }
 
 function batchCard(kind, b) {
@@ -552,6 +557,33 @@ function batchDetail(kind, id) {
 const shortDate = d => parseDate(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const needsBottling = i => !i.bottled;
 const needsLabel = i => !!i.bottled && !i.labeled; // labels go on once it's bottled
+const isComplete = i => !!i.bottled && !!i.labeled;
+// Tinctures, salves and teas wait in their own tab until bottled and labeled; then they're Finished.
+const TAB_FOR_TYPE = { tincture: 'infusing', salve: 'salves', tea: 'teas' };
+const stillToFinish = type => state.inventory.filter(i => i.type === type && !isComplete(i))
+  .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+const inFinished = i => isComplete(i) || !TAB_FOR_TYPE[i.type];
+
+// A strained/poured/blended batch card, with its Bottled and Labeled buttons.
+function finishedCard(i) {
+  return `<div class="card" data-open-item="${i.id}" role="button" tabindex="0">
+    <div class="thumb">${inventoryArt(i.type)}</div>
+    <div><h3>${esc(i.name)}</h3>
+      <p class="meta">${i.type === 'salve' ? 'Poured' : i.type === 'tea' ? 'Blended' : i.type === 'tincture' ? 'Strained' : 'Made'} ${fmtDate(i.date)}${i.started ? `<br>Started ${fmtDate(i.started)}` : ''}</p>
+      ${i.size ? `<span class="tag">${esc(i.size)}</span>` : ''}</div>
+    ${i.qty != null ? `<div class="made"><b>${i.qty}</b><small>made</small></div>` : `<span class="chev">${ICONS.chev}</span>`}
+    ${checkChips(i)}
+  </div>`;
+}
+
+// The "Bottling & labeling" section shown in the Tinctures, Salves and Teas tabs.
+function toFinishSection(type) {
+  const list = stillToFinish(type);
+  if (!list.length) return '';
+  return `<h2 class="section-h to-finish-h">Bottling &amp; labeling <span class="count">${list.length}</span></h2>
+    <p class="fineprint to-finish-note">Check off <b>Bottled</b> and <b>Labeled</b>. Once both are done, it moves to Finished.</p>
+    <div class="list">${list.map(finishedCard).join('')}</div>`;
+}
 
 // The two checkboxes used in the finish/add/edit forms.
 function checkFields(i = {}) {
@@ -577,7 +609,7 @@ function finishForm(kind, b) {
   const isT = kind === 'tincture';
   openSheet(`
     <div class="sheet-head"><h2>${isT ? 'Strain & bottle' : 'Make salve'}</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
-    <p class="fineprint" style="text-align:left;margin:0 0 12px">This moves <b>${esc(b.name)}</b> to Finished.</p>
+    <p class="fineprint" style="text-align:left;margin:0 0 12px"><b>${esc(b.name)}</b> stays in this tab until it's bottled and labeled, then moves to Finished.</p>
     <form id="ff">
       <label class="field"><span>Name</span><input name="name" required value="${esc(b.name)}"></label>
       <div class="two">
@@ -601,7 +633,8 @@ function finishForm(kind, b) {
       state[list] = state[list].filter(x => x.id !== b.id);
       delete state.shaken[b.id];
       save(); closeSheet(); render();
-      toast(`${f.name.value.trim()} moved to Finished`);
+      const done = f.bottled.checked && f.labeled.checked;
+      toast(done ? `${f.name.value.trim()} moved to Finished` : `${f.name.value.trim()} strained. Bottle and label it below to finish.`);
     });
   });
 }
@@ -613,15 +646,14 @@ const TYPE_LABEL = { tincture: 'Tincture', salve: 'Salve', tea: 'Tea', other: 'O
 function viewInventory() {
   const q = ui.search.inventory.toLowerCase();
   const f = ui.filters.inventory;
-  const todo = ui.filters.todo;
   const items = state.inventory
+    .filter(inFinished)
     .filter(i => (f === 'all' || i.type === f) && (!q || i.name.toLowerCase().includes(q)))
-    .filter(i => todo === 'bottle' ? needsBottling(i) : todo === 'label' ? needsLabel(i) : true)
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.name.localeCompare(b.name));
   const head = `<div class="backbar phone-only"><button class="iconbtn" data-go="home" aria-label="Back to home">${ICONS.back}</button></div>` + pageHead(`<span style="color:var(--forest)">${ICONS.shelf}</span>`, 'Finished', 'A record of every batch you\'ve made.', 'add-item');
 
-  if (!state.inventory.length) {
-    return head + emptyState('Nothing finished yet', 'When you strain a tincture or pour a salve it\'s logged here: what you made, how many, and when. You can also add one by hand.', 'add-item', 'Add a finished batch');
+  if (!state.inventory.some(inFinished)) {
+    return head + emptyState('Nothing finished yet', 'Batches land here once they\'re bottled and labeled: what you made, how many, and when. Until then they wait in their own tab.', 'add-item', 'Add a finished batch');
   }
   return head + `
     <div class="searchrow">
@@ -630,16 +662,7 @@ function viewInventory() {
         ${[['all', 'All Types'], ['tincture', 'Tinctures'], ['salve', 'Salves'], ['tea', 'Teas'], ['other', 'Other']].map(([v, l]) => `<option value="${v}" ${f === v ? 'selected' : ''}>${l}</option>`).join('')}
       </select>
     </div>
-    ${chips('todo', [['all', 'All'], ['bottle', `Needs bottling (${state.inventory.filter(needsBottling).length})`], ['label', `Needs labels (${state.inventory.filter(needsLabel).length})`]])}
-    <div class="list">${items.map(i => `
-      <div class="card" data-open-item="${i.id}" role="button" tabindex="0">
-        <div class="thumb">${inventoryArt(i.type)}</div>
-        <div><h3>${esc(i.name)}</h3>
-          <p class="meta">${i.type === 'salve' ? 'Poured' : 'Finished'} ${fmtDate(i.date)}${i.started ? `<br>Started ${fmtDate(i.started)}` : ''}</p>
-          ${i.size ? `<span class="tag">${esc(i.size)}</span>` : ''}</div>
-        ${i.qty != null ? `<div class="made"><b>${i.qty}</b><small>made</small></div>` : `<span class="chev">${ICONS.chev}</span>`}
-        ${checkChips(i)}
-      </div>`).join('') || `<p class="fineprint">${todo === 'all' ? 'No matches.' : 'All done here.'}</p>`}</div>`;
+    <div class="list">${items.map(finishedCard).join('') || '<p class="fineprint">No matches.</p>'}</div>`;
 }
 
 function itemForm(existing, preset = {}) {
@@ -718,10 +741,11 @@ function recipeCard(r) {
 function viewTeas() {
   const head = pageHead(`<span style="color:var(--forest)">${ICONS.tea}</span>`, 'Teas', 'Your tea blends and how to brew them.', 'add-tea');
   const teas = state.recipes.filter(r => r.type === 'tea').sort((a, b) => a.name.localeCompare(b.name));
-  if (!teas.length) {
-    return head + emptyState('No tea blends yet', 'Add a blend with its herbs, ratios and brewing steps. When you mix a batch, log it and it shows up in Finished.', 'add-tea', 'Add a tea blend');
+  const pending = toFinishSection('tea');
+  if (!teas.length && !pending) {
+    return head + emptyState('No tea blends yet', 'Add a blend with its herbs, ratios and brewing steps. When you mix a batch, log it, then bottle and label it.', 'add-tea', 'Add a tea blend');
   }
-  return head + `<div class="list">${teas.map(recipeCard).join('')}</div>`;
+  return head + (teas.length ? `<div class="list">${teas.map(recipeCard).join('')}</div>` : '') + pending;
 }
 
 function viewRecipe() {
@@ -1334,7 +1358,8 @@ function bindView() {
         const f = check.dataset.check;
         item[f] = item[f] ? null : today();
         save(); render();
-        toast(item[f] ? `${item.name}: ${f === 'bottled' ? 'bottled' : 'labeled'} ✓` : `${item.name}: unchecked ${f}`);
+        toast(isComplete(item) && TAB_FOR_TYPE[item.type] ? `${item.name} is bottled and labeled. Moved to Finished ✓`
+          : item[f] ? `${item.name}: ${f === 'bottled' ? 'bottled' : 'labeled'} ✓` : `${item.name}: unchecked ${f}`);
       }
       return;
     }
@@ -1365,7 +1390,7 @@ function bindView() {
     else if (act === 'add-tea') recipeForm(null, 'tea');
     else if (act === 'log-tea') {
       const r = state.recipes.find(x => x.id === ui.recipeId);
-      itemForm(null, { name: r.name, type: 'tea' });
+      itemForm(null, { name: r.name, type: 'tea', date: today() });
     }
     else if (act === 'recipe-back') { ui.recipeId = null; render(); }
     else if (act === 'edit-recipe') recipeForm(state.recipes.find(r => r.id === ui.recipeId));
