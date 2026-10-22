@@ -88,6 +88,7 @@ function toast(msg, ms = 3800) {
 /* ================= Icons & art ================= */
 
 const ICONS = {
+  leaf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20c0-9 6-15 15-15 0 9-6 15-15 15z"/><path d="M5 20 14 11"/><path d="M9 16h4M11 13v3"/></svg>',
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
   tea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h13v4a6 6 0 0 1-6 6h-1a6 6 0 0 1-6-6z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M8 7c0-1.5 1.5-2 1.5-3.5M12 7c0-1.5 1.5-2 1.5-3.5"/><path d="M3 21h16"/></svg>',
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20 9 9l3.5 5L16 8l6 12z"/><circle cx="6.5" cy="6" r="2"/></svg>',
@@ -208,7 +209,7 @@ function render() {
   const who = $('#side-user');
   if (who) who.innerHTML = session ? `<b>${esc(session.user.user_metadata?.name || session.user.email)}</b><small>${member ? ROLE_LABEL[member.role] : ''}</small>` : '';
   const v = $('#view');
-  if (ui.tab === 'home') v.innerHTML = state.settings.homeStyle === 'new' ? viewHomeNew() : viewHome();
+  if (ui.tab === 'home') v.innerHTML = state.settings.homeStyle === 'classic' ? viewHome() : viewHomeCal();
   else if (ui.tab === 'infusing') v.innerHTML = viewBatches('tincture');
   else if (ui.tab === 'salves') v.innerHTML = viewBatches('salve');
   else if (ui.tab === 'inventory') v.innerHTML = viewInventory();
@@ -260,150 +261,152 @@ function whenText(left) {
   return `In ${left} days`;
 }
 
-/* ---------- New Home: Today card, shelf of jars, batch journey, two-week calendar ---------- */
+/* ---------- Calendar Home: this week at a glance, today's to-dos, what's coming ---------- */
 
-function viewHomeNew() {
+// Short sayings for the desktop quote card; one per day.
+const HOME_SAYINGS = [
+  'Good things take time to steep.',
+  'Every herb has its season.',
+  'Slow and steady fills the jar.',
+  'Patience is the best preservative.',
+  'Tend the small things, and the shelf fills itself.',
+  'Gathered by hand, made with care.',
+  'Let it rest. The best work happens quietly.',
+];
+
+function viewHomeCal() {
   const now = new Date();
   const h = now.getHours();
   const part = h >= 5 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'afternoon' : 'evening';
   const name = session?.user?.user_metadata?.name;
+  const greeting = `Good ${part}${name ? `, ${esc(name)}` : ''}`;
   const dateText = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
   const batches = allBatches();
   const ready = batches.filter(x => x.info.ready);
-  const infusing = batches.filter(x => !x.info.ready);
+  const upcoming = batches.filter(x => !x.info.ready);
   const toBottle = state.inventory.filter(needsBottling);
   const toLabel = state.inventory.filter(needsLabel);
-  const finished = state.inventory.filter(isComplete);
+  const month = today().slice(0, 7);
+  const madeMonth = state.inventory.filter(i => isComplete(i) && (i.date || '').startsWith(month)).length;
+  const shakeNeed = state.settings.shakeReminders
+    ? state.tinctures.filter(b => !batchInfo(b).ready && state.shaken[b.id] !== today()).length : 0;
   const tabFor = list => TAB_FOR_TYPE[list[0]?.type] || 'inventory';
   const goAttrs = (tab, filter) => `data-go="${tab}" ${filter && (tab === 'infusing' || tab === 'salves') ? `data-go-filter="${filter}"` : ''}`;
-  const preview = list => { const n = list.map(x => x.name || x.b.name); return n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3} more` : ''); };
+  const batchWord = n => n === 1 ? 'batch' : 'batches';
 
-  // Today: the single most useful thing to do right now.
-  let card;
-  if (ready.length === 1) {
-    const x = ready[0];
-    card = { tone: 'ready', icon: ICONS.jar, title: `${x.b.name} is ready`,
-      sub: x.kind === 'tincture' ? 'Time to strain and bottle it.' : 'The oil is ready. Time to make the salve.',
-      btn: x.kind === 'tincture' ? 'Strain now' : 'Make salve', attrs: `data-open-batch="${x.b.id}" data-kind="${x.kind}"` };
-  } else if (ready.length > 1) {
-    const salvesOnly = ready.every(x => x.kind === 'salve');
-    card = { tone: 'ready', icon: ICONS.jar, title: `${ready.length} batches are ready`, sub: preview(ready),
-      btn: 'See them', attrs: goAttrs(salvesOnly ? 'salves' : 'infusing', 'ready') };
-  } else if (toBottle.length) {
-    card = { tone: 'todo', icon: ICONS.bottle, title: `${toBottle.length} ${toBottle.length === 1 ? 'batch' : 'batches'} to bottle`,
-      sub: preview(toBottle), btn: 'Start bottling', attrs: goAttrs(tabFor(toBottle), 'finish') };
-  } else if (toLabel.length) {
-    card = { tone: 'todo', icon: ICONS.tag, title: `${toLabel.length} ${toLabel.length === 1 ? 'batch' : 'batches'} to label`,
-      sub: preview(toLabel), btn: 'Start labeling', attrs: goAttrs(tabFor(toLabel), 'finish') };
-  } else {
-    const next = infusing[0];
-    card = { tone: 'calm', icon: ICONS.home, title: 'All caught up',
-      sub: next ? `Next up: ${next.b.name}, ${whenText(next.info.left).toLowerCase()}.` : 'Nothing infusing right now.',
-      btn: !next && canEdit('tinctures') ? 'Start a tincture' : '', attrs: 'data-act="home-add-tincture"' };
-  }
-  const also = [
-    ready.length && card.tone !== 'ready' ? `${ready.length} ready` : '',
-    toBottle.length && !card.title.includes('to bottle') ? `${toBottle.length} to bottle` : '',
-    toLabel.length && !card.title.includes('to label') ? `${toLabel.length} to label` : '',
+  // This week (Sunday to Saturday), moved with the arrows.
+  const t = parseDate(today());
+  const weekStart = addDays(today(), -t.getDay() + (ui.calWeek || 0) * 7);
+  const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const monthLabel = parseDate(week[3]).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const days = week.map(d => {
+    const dt = parseDate(d);
+    const due = batches.filter(x => x.b.ready === d);
+    return `<button class="wk-day ${d === today() ? 'today' : ''} ${due.length ? 'has' : ''}" ${due.length ? `data-day="${d}"` : 'tabindex="-1"'}
+        aria-label="${dt.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}${due.length ? `: ${due.map(x => esc(x.b.name)).join(', ')}` : ''}">
+      <span>${dt.toLocaleDateString(undefined, { weekday: 'short' })}</span><b>${dt.getDate()}</b><i></i></button>`;
+  }).join('');
+
+  const stat = (icon, n, label, attrs, hot) =>
+    `<button class="hc-stat ${hot ? 'hot' : ''}" ${attrs}><span class="hc-stat-ico">${icon}</span><b>${n}</b><small>${label}</small></button>`;
+
+  // Today: only what actually needs doing.
+  const todo = [
+    ...ready.map(x => [ICONS.jar, x.kind === 'tincture' ? `${x.b.name} is ready to strain` : `${x.b.name} oil is ready to make`, `data-open-batch="${x.b.id}" data-kind="${x.kind}"`]),
+    toBottle.length ? [ICONS.bottle, `Bottle ${toBottle.length} ${batchWord(toBottle.length)}`, goAttrs(tabFor(toBottle), 'finish')] : null,
+    toLabel.length ? [ICONS.tag, `Label ${toLabel.length} ${batchWord(toLabel.length)}`, goAttrs(tabFor(toLabel), 'finish')] : null,
+    shakeNeed ? [ICONS.bottle, `Shake ${plural(shakeNeed, 'jar')}`, 'data-go="infusing"'] : null,
   ].filter(Boolean);
 
-  // The shelf: tinctures as amber bottles, salves as tins. Liquid level = how far along.
-  const jar = x => `<button class="jar ${x.info.ready ? 'is-ready' : ''}" data-open-batch="${x.b.id}" data-kind="${x.kind}" aria-label="${esc(x.b.name)}, ${esc(leftText(x.info))}">
-      <span class="jar-art">${x.kind === 'salve' ? tinArt() : bottleArt(x.info.pct)}</span>
-      <span class="jar-label"><b>${esc(x.b.name)}</b><small>${x.info.ready ? 'Ready' : x.info.left === 1 ? '1 day' : `${x.info.left} days`}</small></span>
-    </button>`;
-  const tinctureJars = batches.filter(x => x.kind === 'tincture');
-  const salveTins = batches.filter(x => x.kind === 'salve');
-  const shelfRow = (list, label) => list.length ? `<div class="shelf" aria-label="${label}"><div class="shelf-row">${list.map(jar).join('')}</div><div class="plank"></div></div>` : '';
-
-  // Journey: where every batch is in the process.
-  const steps = [
-    ['Infusing', infusing.length, goAttrs('infusing', 'infusing')],
-    ['Ready', ready.length, goAttrs(ready.length && ready.every(x => x.kind === 'salve') ? 'salves' : 'infusing', 'ready')],
-    ['To bottle', toBottle.length, goAttrs(tabFor(toBottle), 'finish')],
-    ['To label', toLabel.length, goAttrs(tabFor(toLabel), 'finish')],
-    ['Finished', finished.length, 'data-go="inventory"'],
-  ];
-
-  // Two weeks ahead, with a dot on each day something comes ready.
-  const days = Array.from({ length: 14 }, (_, i) => addDays(today(), i));
-  const cal = days.map((d, i) => {
-    const due = batches.filter(x => x.b.ready === d);
-    const dt = parseDate(d);
-    const attrs = due.length === 1 ? `data-open-batch="${due[0].b.id}" data-kind="${due[0].kind}"` : due.length ? goAttrs('infusing', 'all') : '';
-    const title = due.length ? `${dt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}: ${due.map(x => x.b.name).join(', ')}` : '';
-    return `<button class="cal-day ${i === 0 ? 'today' : ''} ${due.length ? 'has' : ''}" ${attrs} ${due.length ? '' : 'tabindex="-1"'} title="${esc(title)}">
-      <span>${dt.toLocaleDateString(undefined, { weekday: 'narrow' })}</span><b>${dt.getDate()}</b>
-      <i>${due.length > 1 ? due.length : due.length ? '' : ''}</i></button>`;
+  // Coming up: grouped by ready date.
+  const groups = [];
+  for (const x of upcoming) {
+    const g = groups[groups.length - 1];
+    if (g && g.date === x.b.ready) g.items.push(x); else groups.push({ date: x.b.ready, left: x.info.left, items: [x] });
+  }
+  const coming = groups.slice(0, 5).map(g => {
+    const d = parseDate(g.date);
+    return `<li><button class="tl2" ${g.items.length === 1 ? `data-open-batch="${g.items[0].b.id}" data-kind="${g.items[0].kind}"` : `data-day="${g.date}"`}>
+      <span class="tl2-date"><b>${d.toLocaleDateString(undefined, { weekday: 'short' })}</b><small>${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</small></span>
+      <span class="tl2-dot" aria-hidden="true"></span>
+      <span class="tl2-names">${g.items.map(x => esc(x.b.name)).join(', ')}</span>
+      <span class="tl2-when">${whenText(g.left).replace(/^In /, 'in ')}</span></button></li>`;
   }).join('');
-  const nextDue = batches.filter(x => !x.info.ready && x.info.left <= 13);
-  const calNote = nextDue.length
-    ? nextDue.slice(0, 3).map(x => `<b>${esc(x.b.name)}</b> ${parseDate(x.b.ready).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}`).join(' · ')
-    : 'Nothing comes ready in the next two weeks.';
 
-  const recent = finished.sort((a, z) => (z.date || '').localeCompare(a.date || '')).slice(0, 4);
+  const recent = state.inventory.filter(isComplete).sort((a, z) => (z.date || '').localeCompare(a.date || '')).slice(0, 3);
+  const saying = HOME_SAYINGS[Math.floor(Date.now() / 864e5) % HOME_SAYINGS.length];
 
-  return `<div class="home2 ${part}">
-    <header class="h2-head">
-      <div>
-        <p class="h2-date">${dateText}</p>
-        <h1 class="h2-greet">Good ${part}${name ? `, ${esc(name)}` : ''}</h1>
-      </div>
+  return `<div class="hc ${todo.length ? '' : 'no-today'}">
+    <header class="hc-head">
+      <span class="hc-sprig left" aria-hidden="true">${sprigArt('lavender', 70, 90)}</span>
+      <span class="hc-sprig right" aria-hidden="true">${sprigArt('chamomile', 70, 90)}</span>
       <button class="iconbtn gear phone-only" data-go="settings" aria-label="Settings">${ICONS.gear}</button>
+      <img class="hc-logo phone-only" src="icons/logo.png" alt="Mountain Trails Wellness Studio">
+      <h1 class="hc-greet">${greeting}<span class="hc-date-inline"> · ${dateText}</span></h1>
+      <p class="hc-date">${dateText}</p>
     </header>
 
-    <section class="today-card ${card.tone}">
-      <span class="today-ico">${card.icon}</span>
-      <div class="today-text"><b>${esc(card.title)}</b><span>${esc(card.sub)}</span>
-        ${also.length ? `<small>Also: ${also.join(' · ')}</small>` : ''}</div>
-      ${card.btn ? `<button class="btn ${card.tone === 'ready' ? '' : 'ghost'}" ${card.attrs}>${esc(card.btn)}</button>` : ''}
+    <section class="panel hc-cal">
+      <div class="wk-top">
+        <h2>${monthLabel}</h2>
+        <div class="wk-nav">
+          <button class="iconbtn" data-week="-1" aria-label="Previous week">${ICONS.back}</button>
+          <button class="chip" data-week="0" aria-pressed="${!(ui.calWeek || 0)}">Today</button>
+          <button class="iconbtn" data-week="1" aria-label="Next week">${ICONS.chev}</button>
+        </div>
+      </div>
+      <div class="wk">${days}</div>
     </section>
 
-    <section class="shelf-wrap">
-      <div class="h2-sec"><h2>On the shelf</h2><button class="linkbtn" data-go="infusing">All tinctures</button></div>
-      ${tinctureJars.length || salveTins.length
-        ? shelfRow(tinctureJars, 'Tinctures') + shelfRow(salveTins, 'Salves')
-        : `<div class="shelf empty-shelf"><p>The shelf is empty. ${canEdit('tinctures') ? 'Start a tincture to see it here.' : ''}</p><div class="plank"></div></div>`}
-    </section>
+    <aside class="panel hc-quote" aria-label="Saying of the day">
+      <p>${saying}</p>
+      <span aria-hidden="true">${sprigArt('quote', 60, 70)}</span>
+    </aside>
 
-    <div class="h2-grid">
-      <section class="panel journey-card">
-        <h2>Batch journey</h2>
-        <div class="journey">${steps.map(([label, n, attrs], i) => `${i ? '<span class="j-arrow" aria-hidden="true">›</span>' : ''}
-          <button class="j-step ${n ? 'on' : ''}" ${attrs}><b>${n}</b><span>${label}</span></button>`).join('')}</div>
-      </section>
-
-      <section class="panel cal-card">
-        <h2>Next two weeks</h2>
-        <div class="cal">${cal}</div>
-        <p class="cal-note">${calNote}</p>
-      </section>
-
-      ${recent.length ? `<section class="panel recent-card">
-        <div class="h2-sec"><h2>Recently finished</h2><button class="linkbtn" data-go="inventory">See all</button></div>
-        <div class="recent-row">${recent.map(i => `<button class="recent-item" data-open-item="${i.id}">
-          <span class="thumb">${inventoryArt(i.type)}</span><b>${esc(i.name)}</b><small>${fmtDate(i.date)}${i.qty != null ? ` · ${i.qty} made` : ''}</small></button>`).join('')}</div>
-      </section>` : ''}
+    <div class="hc-stats">
+      ${stat(ICONS.leaf, upcoming.filter(x => x.kind === 'tincture').length, 'Infusing', goAttrs('infusing', 'infusing'))}
+      ${stat(ICONS.jar, ready.length, 'Ready', goAttrs(ready.length && ready.every(x => x.kind === 'salve') ? 'salves' : 'infusing', 'ready'), ready.length > 0)}
+      ${stat(ICONS.tin, state.salves.length, 'Salves', 'data-go="salves"')}
+      ${stat(ICONS.leaf, madeMonth, 'Made this month', 'data-go="inventory"')}
     </div>
 
-    ${canEdit('tinctures') ? `<button class="home-fab" data-act="home-add" aria-label="Start something new">${ICONS.plus}</button>` : ''}
+    ${canEdit('tinctures') ? `<div class="hc-actions">
+      <button class="btn" data-act="home-add-tincture">${ICONS.bottle}New tincture</button>
+      <button class="btn ghost" data-act="home-add-salve">${ICONS.tin}New salve</button>
+    </div>` : ''}
+
+    ${todo.length ? `<section class="panel hc-today">
+      <div class="hc-sec"><h2>Today</h2><span class="hc-count">${todo.length} ${todo.length === 1 ? 'item' : 'items'}</span></div>
+      ${todo.map(([icon, text, attrs]) => `<button class="td-row" ${attrs}>
+        <span class="td-box" aria-hidden="true"></span><span class="td-ico">${icon}</span><span class="td-text">${esc(text)}</span><span class="chev">${ICONS.chev}</span></button>`).join('')}
+    </section>` : ''}
+
+    <section class="panel hc-coming">
+      <div class="hc-sec"><h2>Coming up</h2><button class="linkbtn" data-go="infusing">View all</button></div>
+      ${coming ? `<ol class="tl2-list">${coming}</ol>` : '<p class="caught"><span>Nothing infusing right now.</span></p>'}
+    </section>
+
+    ${recent.length ? `<section class="panel hc-recent">
+      <div class="hc-sec"><h2>Recently finished</h2><button class="linkbtn" data-go="inventory">See all</button></div>
+      ${recent.map(i => `<button class="rf-row" data-open-item="${i.id}">
+        <span class="rf-thumb">${inventoryArt(i.type)}</span>
+        <span class="rf-text"><b>${esc(i.name)}</b><small>${i.qty != null ? `${i.qty} made` : TYPE_LABEL[i.type]}</small></span>
+        <span class="rf-date">${shortDate(i.date)}</span></button>`).join('')}
+    </section>` : ''}
   </div>`;
 }
 
-// The floating + on the new Home: pick what to start.
-function addChooser() {
+// Tapping a calendar day with more than one batch: list them.
+function dayList(date) {
+  const due = allBatches().filter(x => x.b.ready === date);
   openSheet(`
-    <div class="sheet-head"><h2>Start something</h2><button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
-    <div class="chooser">
-      <button class="btn block" data-new="tincture">${ICONS.bottle}New tincture</button>
-      <button class="btn block ghost" data-new="salve">${ICONS.tin}New salve</button>
-      ${canEdit('recipes') ? `<button class="btn block ghost" data-new="tea">${ICONS.tea}New tea blend</button>` : ''}
-    </div>`, sheet => {
+    <div class="sheet-head"><h2>${parseDate(date).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
+      <button class="iconbtn" data-close aria-label="Close">${ICONS.close}</button></div>
+    <div class="list">${due.map(x => batchCard(x.kind, x.b)).join('')}</div>`, sheet => {
     sheet.addEventListener('click', e => {
-      const b = e.target.closest('[data-new]');
-      if (!b) return;
-      if (b.dataset.new === 'tea') recipeForm(null, 'tea'); else batchForm(b.dataset.new);
+      const c = e.target.closest('[data-open-batch]');
+      if (c) batchDetail(c.dataset.kind, c.dataset.openBatch);
     });
   });
 }
@@ -1073,10 +1076,10 @@ function viewSettings() {
       ${toggle('shakeReminders', 'Daily shake reminders', 'Show a "shaken today" check on each infusing jar.')}
     </section>
     <section class="group"><h2>App</h2>
-      <div class="row"><div class="label">Home style<small>Try the new Home, or switch back to the classic one. Just changes this device.</small></div>
+      <div class="row"><div class="label">Home style<small>Calendar (this week at a glance) or the classic Home. Just changes this device.</small></div>
         <select id="home-style" class="name-input" aria-label="Home style">
-          <option value="new" ${s.homeStyle === 'new' ? 'selected' : ''}>New</option>
-          <option value="classic" ${s.homeStyle !== 'new' ? 'selected' : ''}>Classic</option>
+          <option value="calendar" ${s.homeStyle !== 'classic' ? 'selected' : ''}>Calendar</option>
+          <option value="classic" ${s.homeStyle === 'classic' ? 'selected' : ''}>Classic</option>
         </select></div>
       <div class="row"><div class="label">Get the latest version<small>Reloads the app with any new updates. Your data and sign-in stay as they are.</small></div>
         <button class="btn ghost" data-act="refresh-app" style="min-height:40px">Update</button></div>
@@ -1504,6 +1507,14 @@ function bindView() {
     }
     const filter = t.closest('[data-filter]');
     if (filter) { ui.filters[filter.dataset.filter] = filter.dataset.val; render(); return; }
+    const wk = t.closest('[data-week]');
+    if (wk) { ui.calWeek = wk.dataset.week === '0' ? 0 : (ui.calWeek || 0) + Number(wk.dataset.week); render(); return; }
+    const day = t.closest('[data-day]');
+    if (day) {
+      const due = allBatches().filter(x => x.b.ready === day.dataset.day);
+      if (due.length === 1) batchDetail(due[0].kind, due[0].b.id); else if (due.length) dayList(day.dataset.day);
+      return;
+    }
     const check = t.closest('[data-check]');
     if (check) {
       const item = state.inventory.find(x => x.id === check.dataset.id);
@@ -1538,7 +1549,6 @@ function bindView() {
     if (act === 'add-batch') batchForm(kindForTab());
     else if (act === 'home-add-tincture') batchForm('tincture');
     else if (act === 'home-add-salve') batchForm('salve');
-    else if (act === 'home-add') addChooser();
     else if (act === 'add-item') itemForm();
     else if (act === 'add-recipe') recipeForm();
     else if (act === 'add-tea') recipeForm(null, 'tea');
@@ -1585,7 +1595,7 @@ function bindView() {
   if (homeStyle) homeStyle.onchange = () => {
     state.settings.homeStyle = homeStyle.value;
     save();
-    toast(homeStyle.value === 'classic' ? 'Classic Home is back.' : 'Trying the new Home.');
+    toast(homeStyle.value === 'classic' ? 'Classic Home is on.' : 'Calendar Home is on.');
   };
   const myName = $('#my-name', v);
   if (myName) myName.onchange = async () => {

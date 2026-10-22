@@ -580,6 +580,139 @@ button { cursor: pointer; }
   .list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
+/* ================= Calendar Home ================= */
+.hc-head { position: relative; text-align: center; padding-top: 4px; margin-bottom: 14px; }
+.hc-head .gear { position: absolute; top: 0; right: 0; z-index: 1; }
+.hc-logo { display: block; width: min(220px, 60%); margin: 4px auto 6px; }
+.hc-sprig { position: absolute; top: 8px; opacity: .45; pointer-events: none; }
+.hc-sprig.left { left: -8px; transform: rotate(-14deg); }
+.hc-sprig.right { right: 26px; transform: scaleX(-1) rotate(-14deg); }
+.hc-greet { font-family: var(--serif-head); font-weight: 600; font-size: 30px; line-height: 1.1; margin: 0; }
+.hc-date-inline { display: none; }
+.hc-date { margin: 2px 0 0; font-size: 15px; color: var(--walnut-2); }
+.hc-sec { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.hc-sec h2, .hc .panel h2 { font-family: var(--serif-head); font-size: 22px; font-weight: 600; margin: 0; }
+.hc-count { font-size: 13px; color: var(--walnut-2); }
+.hc .linkbtn { padding: 0; }
+.hc .panel { margin-bottom: 14px; }
+
+/* Week calendar */
+.wk-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.wk-nav { display: flex; align-items: center; gap: 6px; }
+.wk-nav .iconbtn { width: 36px; height: 36px; }
+.wk-nav .chip { min-height: 34px; padding: 4px 12px; }
+.wk { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; padding-bottom: 4px; }
+.wk-day {
+  display: grid; justify-items: center; gap: 2px; padding: 8px 0 6px; border-radius: 10px;
+  border: 0; background: transparent; cursor: default;
+}
+.wk-day span { font-size: 12px; color: var(--walnut-2); }
+.wk-day b { font-size: 18px; font-weight: 600; }
+.wk-day i { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.wk-day.has { cursor: pointer; }
+.wk-day.has i { background: var(--amber); }
+.wk-day.has:hover { background: rgba(212,162,88,.15); }
+.wk-day.today { background: var(--forest); }
+.wk-day.today span, .wk-day.today b { color: var(--parchment); }
+.wk-day.today.has i { background: var(--amber-soft); }
+
+/* Quote card (desktop only) */
+.hc-quote { display: none; }
+
+/* Stats */
+.hc-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.hc-stat {
+  display: grid; justify-items: center; gap: 2px; padding: 12px 4px 10px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: inset 0 0 0 3px var(--card), inset 0 0 0 4px rgba(205,183,146,.55);
+}
+.hc-stat-ico { width: 26px; height: 26px; color: var(--forest); }
+.hc-stat-ico svg { width: 100%; height: 100%; }
+.hc-stat b { font-family: var(--serif-head); font-size: 28px; font-weight: 600; line-height: 1; color: var(--forest); }
+.hc-stat small { font-size: 12px; color: var(--walnut-2); text-align: center; line-height: 1.2; }
+.hc-stat.hot { background: #F8E7C6; border-color: var(--amber); box-shadow: inset 0 0 0 3px #F8E7C6, inset 0 0 0 4px rgba(212,162,88,.6); }
+.hc-stat.hot .hc-stat-ico, .hc-stat.hot b { color: #9A6420; }
+
+/* New buttons */
+.hc-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.hc-actions .btn { width: 100%; min-height: 50px; }
+
+/* Today checklist */
+.td-row {
+  display: grid; grid-template-columns: 22px 26px 1fr auto; gap: 10px; align-items: center;
+  width: 100%; text-align: left; background: none; border: 0; border-top: 1px dotted var(--line);
+  padding: 11px 0; min-height: 50px; font-size: 15px;
+}
+.hc-sec + .td-row { border-top: 0; }
+.td-box { width: 20px; height: 20px; border: 1.5px solid var(--walnut-2); border-radius: 4px; background: var(--parchment); }
+.td-ico { width: 24px; height: 24px; color: #9A6420; }
+.td-ico svg { width: 100%; height: 100%; }
+.td-row .chev { width: 18px; height: 18px; color: var(--walnut-2); }
+.td-row:hover .td-text { color: var(--forest); }
+
+/* Coming up timeline */
+.tl2-list { list-style: none; margin: 0; padding: 0; }
+.tl2 {
+  display: grid; grid-template-columns: 54px 14px 1fr auto; gap: 8px; align-items: center;
+  width: 100%; text-align: left; background: none; border: 0; padding: 9px 0; position: relative;
+}
+.tl2-list li + li .tl2 { border-top: 1px dotted rgba(205,183,146,.6); }
+.tl2-date b { display: block; font-size: 14px; font-weight: 600; }
+.tl2-date small { display: block; font-size: 11.5px; color: var(--walnut-2); text-transform: uppercase; letter-spacing: .5px; }
+.tl2-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--sage); background: var(--parchment); justify-self: center; }
+.tl2-names { font-size: 14.5px; }
+.tl2-when { font-size: 13px; color: var(--walnut-2); white-space: nowrap; }
+.tl2:hover .tl2-names { color: var(--forest); }
+
+/* Recently finished */
+.rf-row {
+  display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center;
+  width: 100%; text-align: left; background: none; border: 0; border-top: 1px dotted var(--line); padding: 8px 0;
+}
+.hc-sec + .rf-row { border-top: 0; }
+.rf-thumb { width: 36px; height: 44px; }
+.rf-thumb svg { width: 100%; height: 100%; }
+.rf-text b { display: block; font-family: var(--serif-head); font-size: 17px; font-weight: 600; line-height: 1.1; }
+.rf-text small { font-size: 12.5px; color: var(--walnut-2); }
+.rf-date { font-size: 13px; color: var(--walnut-2); }
+
+@media (min-width: 900px) {
+  .hc {
+    display: grid; gap: 18px; align-items: start;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "head head actions"
+      "cal cal quote"
+      "stats stats stats"
+      "today coming recent";
+  }
+  .hc.no-today { grid-template-areas: "head head actions" "cal cal quote" "stats stats stats" "coming coming recent"; }
+  .hc .panel, .hc-stats, .hc-actions { margin-bottom: 0; }
+  .hc-head { grid-area: head; text-align: left; margin: 0; padding: 0; align-self: center; }
+  .hc-sprig, .hc-logo, .hc-head .gear { display: none; }
+  .hc-actions .btn { white-space: nowrap; padding: 0 12px; }
+  .hc-greet { font-size: 34px; }
+  .hc-date-inline { display: inline; }
+  .hc-date { display: none; }
+  .hc-actions { grid-area: actions; align-self: center; }
+  .hc-cal { grid-area: cal; }
+  .hc-quote {
+    grid-area: quote; align-self: stretch;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: linear-gradient(135deg, #FBF4E6, #F1E4C7);
+  }
+  .hc-quote p { margin: 0; font-family: var(--serif-head); font-style: italic; font-size: 22px; line-height: 1.3; color: var(--walnut-2); }
+  .hc-quote span { flex: none; opacity: .7; }
+  .hc-stats { grid-area: stats; gap: 14px; }
+  .hc-stat { grid-template-columns: 44px auto; grid-template-rows: auto auto; justify-content: start; justify-items: start; column-gap: 12px; padding: 16px 20px; text-align: left; }
+  .hc-stat-ico { grid-row: span 2; width: 40px; height: 40px; align-self: center; }
+  .hc-stat b { font-size: 32px; }
+  .hc-stat small { text-align: left; font-size: 13.5px; }
+  .hc-today { grid-area: today; } .hc-coming { grid-area: coming; } .hc-recent { grid-area: recent; }
+  .wk-day { padding: 12px 0 10px; }
+  .wk-day b { font-size: 22px; }
+}
+
 /* ================= New Home ================= */
 .home2 { position: relative; }
 .h2-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
@@ -613,11 +746,10 @@ button { cursor: pointer; }
 .shelf { position: relative; padding: 6px 4px 0; }
 .shelf-row { display: flex; gap: 6px; overflow-x: auto; padding: 4px 4px 0; scroll-snap-type: x proximity; scrollbar-width: none; align-items: flex-end; }
 .shelf-row::-webkit-scrollbar { display: none; }
-/* A quiet parchment ledge, so the jars stay the focus. */
 .plank {
-  height: 5px; margin: 0 0 14px; border-radius: 3px;
-  background: linear-gradient(var(--parchment-3), #D8C49F);
-  box-shadow: 0 3px 6px -3px rgba(62,47,31,.18);
+  height: 16px; margin: -2px -4px 14px; border-radius: 3px;
+  background: linear-gradient(#9A6B3E, #7A5130 55%, #5E3D23);
+  box-shadow: 0 6px 10px -4px rgba(62,47,31,.45), inset 0 1px 0 rgba(255,235,200,.35);
 }
 .jar {
   flex: none; width: 84px; scroll-snap-align: start;
