@@ -366,7 +366,7 @@ function viewBatches(kind) {
   const shown = all.filter(b => f === 'all' || (f === 'ready') === batchInfo(b).ready);
 
   const head = kind === 'tincture'
-    ? pageHead(sprigArt('lavender', 56, 56), 'Infusing', 'Track your tinctures and never miss a harvest.', 'add-batch')
+    ? pageHead(sprigArt('lavender', 56, 56), 'Tinctures', 'Track your tinctures and never miss a harvest.', 'add-batch')
     : pageHead(sprigArt('calendula', 56, 56), 'Salves', 'Track your salve batches from start to finish.', 'add-batch');
 
   if (!all.length) {
