@@ -1470,22 +1470,26 @@ function welcomeLine() {
   return '';
 }
 
-// Her mountains drawn in ink, with the sun (or moon) rising behind them.
+// Her logo, sketched in ink stroke by stroke (left to right, top to bottom), then filled in
+// while the sun (or moon) rises into place. Art comes from logo-art.js (traced from her logo).
 function welcomeArt(part) {
+  const L = window.LOGO_ART;
+  if (!L) return '<img class="w-logo" src="icons/logo.png" alt="">';
   const night = part === 'evening';
-  const sunY = { morning: 64, afternoon: 46, evening: 50 }[part];
-  return `<svg viewBox="0 0 300 160" aria-hidden="true">
-    ${night ? [[40, 30], [70, 18], [235, 26], [262, 44], [205, 14], [120, 22], [282, 16]].map(([x, y], i) =>
-      `<circle class="w-star" style="animation-delay:${0.6 + i * 0.15}s" cx="${x}" cy="${y}" r="1.4"/>`).join('') : ''}
-    <g class="w-sun"><circle cx="118" cy="${sunY}" r="24" class="${night ? 'w-moon' : 'w-sunball'}"/>
-      ${night ? '<circle cx="110" cy="44" r="3.5" class="w-crater"/><circle cx="126" cy="58" r="2.5" class="w-crater"/>' : ''}</g>
-    <path class="w-fill" d="M8 140 L62 92 L80 104 L132 40 L160 74 L178 62 L196 80 L222 58 L292 140 Z"/>
-    <path class="w-draw" pathLength="1" d="M8 140 L62 92 L80 104 L132 40 L160 74 L178 62 L196 80 L222 58 L292 140"/>
-    <path class="w-draw w-thin" pathLength="1" style="animation-delay:.5s" d="M132 40 L122 62 L128 60 L118 84 M222 58 L214 76 L219 74 L210 92 M62 92 L70 106 M178 62 L172 78"/>
-    <path class="w-draw w-hatch" pathLength="1" style="animation-delay:.7s" d="M96 92 L120 64 M90 104 L118 72 M86 116 L116 82 M196 96 L214 76 M192 108 L212 86"/>
-    <g class="w-trees">${[[20, 140, 1], [30, 140, 1.3], [42, 140, 0.9], [250, 140, 1.2], [262, 140, 0.9], [274, 140, 1.4], [150, 140, 0.8], [160, 140, 1.1]].map(([x, y, s]) =>
-      `<path d="M${x} ${y} l${-6 * s} 0 l${4 * s} ${-7 * s} l${-3 * s} 0 l${5 * s} ${-9 * s} l${5 * s} ${9 * s} l${-3 * s} 0 l${4 * s} ${7 * s} z"/>`).join('')}</g>
-    <path class="w-draw w-ground" pathLength="1" d="M4 141 L296 141"/>
+  const { cx, cy, r } = L.sun;
+  const strokes = L.d.split(/(?=M)/).filter(Boolean).map(p => {
+    const [x, y] = p.match(/-?[\d.]+/g).map(Number);
+    const delay = (x / L.w) * 0.75 + (y / L.h) * 0.45;
+    return `<path class="w-draw" pathLength="1" style="animation-delay:${delay.toFixed(2)}s" d="${p}"/>`;
+  }).join('');
+  const stars = night ? [[60, 70], [130, 30], [40, 170], [820, 60], [760, 110], [870, 150], [700, 30]].map(([x, y], i) =>
+    `<circle class="w-star" style="animation-delay:${0.8 + i * 0.15}s" cx="${x}" cy="${y}" r="4"/>`).join('') : '';
+  return `<svg viewBox="0 0 ${L.w} ${L.h}" aria-hidden="true">
+    <defs><clipPath id="w-horizon"><rect x="0" y="0" width="${L.w}" height="${cy + r + 2}"/></clipPath></defs>
+    ${stars}
+    <g clip-path="url(#w-horizon)"><circle class="w-sun ${night ? 'w-moon' : 'w-sunball'}" cx="${cx}" cy="${cy}" r="${r}"/></g>
+    <path class="w-ink" fill-rule="evenodd" d="${L.d}"/>
+    <g class="w-strokes">${strokes}</g>
   </svg>`;
 }
 
@@ -1501,8 +1505,6 @@ function showWelcome() {
   el.setAttribute('role', 'status');
   el.innerHTML = `
     <div class="w-scene">${welcomeArt(part)}</div>
-    <div class="w-title">Mountain Trails</div>
-    <div class="w-sub">Wellness Studio</div>
     <div class="w-greet">Good ${part}${name ? `, ${esc(name)}` : ''}</div>
     ${line ? `<div class="w-line">${esc(line)}</div>` : ''}
     <div class="w-skip">Tap to skip</div>`;
@@ -1515,7 +1517,7 @@ function showWelcome() {
     setTimeout(() => el.remove(), 450);
   };
   el.addEventListener('click', close);
-  setTimeout(close, line ? 3000 : 2600);
+  setTimeout(close, line ? 3600 : 3200);
 }
 
 /* ================= Boot ================= */
