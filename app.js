@@ -1498,11 +1498,11 @@ function welcomeArt(part) {
   const { cx, cy, r } = L.sun;
   const strokes = L.d.split(/(?=M)/).filter(Boolean).map(p => {
     const [x, y] = p.match(/-?[\d.]+/g).map(Number);
-    const delay = (x / L.w) * 0.75 + (y / L.h) * 0.45;
+    const delay = (x / L.w) * 0.38 + (y / L.h) * 0.22;
     return `<path class="w-draw" pathLength="1" style="animation-delay:${delay.toFixed(2)}s" d="${p}"/>`;
   }).join('');
   const stars = night ? [[60, 70], [130, 30], [40, 170], [820, 60], [760, 110], [870, 150], [700, 30]].map(([x, y], i) =>
-    `<circle class="w-star" style="animation-delay:${0.8 + i * 0.15}s" cx="${x}" cy="${y}" r="4"/>`).join('') : '';
+    `<circle class="w-star" style="animation-delay:${0.4 + i * 0.08}s" cx="${x}" cy="${y}" r="4"/>`).join('') : '';
   return `<svg viewBox="0 0 ${L.w} ${L.h}" aria-hidden="true">
     <defs><clipPath id="w-horizon"><rect x="0" y="0" width="${L.w}" height="${cy + r + 2}"/></clipPath></defs>
     ${stars}
@@ -1533,10 +1533,10 @@ function showWelcome() {
     if (closed) return;
     closed = true;
     el.classList.add('out');
-    setTimeout(() => el.remove(), 450);
+    setTimeout(() => el.remove(), 250);
   };
   el.addEventListener('click', close);
-  setTimeout(close, line ? 3600 : 3200);
+  setTimeout(close, line ? 1800 : 1600);
 }
 
 /* ================= Boot ================= */
