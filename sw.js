@@ -1,5 +1,5 @@
 ﻿// Offline support: use the network when available (so updates show up right away), fall back to cache offline.
-const CACHE = 'mtws-apothecary-v9';
+const CACHE = 'mtws-apothecary-v10';
 const SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'app.js', 'manifest.webmanifest',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/logo.png',
@@ -30,6 +30,18 @@ self.addEventListener('fetch', e => {
       return res;
     }).catch(() => cache.match(e.request, { ignoreSearch: true }))
   ));
+});
+
+// Morning reminders sent by the studio's scheduled job, even when the app is closed.
+self.addEventListener('push', e => {
+  let msg = {};
+  try { msg = e.data ? e.data.json() : {}; } catch (err) { msg = { body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(msg.title || 'Mountain Trails Apothecary', {
+    body: msg.body || 'Something is ready.',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: 'apothecary-ready',
+  }));
 });
 
 self.addEventListener('notificationclick', e => {

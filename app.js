@@ -815,6 +815,7 @@ function viewSettings() {
   const permNote = perm === 'unsupported'
     ? 'This browser can\'t show notifications. On iPhone, add the app to your Home Screen first (Share → Add to Home Screen).'
     : perm === 'denied' ? 'Notifications are blocked for this app in your phone\'s settings.'
+    : pushSupported() ? 'A notification at 9 AM the day a batch is ready, even with the app closed.'
     : 'Alerts pop up when you open the app and a batch is ready.';
   const toggle = (key, label, sub) => `<div class="row"><div class="label">${label}<small>${sub}</small></div>
     <label class="switch"><input type="checkbox" data-setting="${key}" ${s[key] ? 'checked' : ''} aria-label="${label}"><span></span></label></div>`;
@@ -1042,6 +1043,7 @@ function showNewPassword() {
 async function signOut() {
   if (pendingChanges().count && !confirm('Some changes haven\'t uploaded yet and will be lost if you sign out. Sign out anyway?')) return;
   if (!confirm('Sign out of the app on this phone?')) return;
+  await unsubscribePush(); // stop this phone getting the studio's reminders
   await sb?.auth.signOut();
   localStorage.removeItem(STORE_KEY);
   localStorage.removeItem(SYNCED_KEY);
@@ -1093,17 +1095,61 @@ async function enterApp() {
   render();
   setTimeout(checkReminders, 600);
   pullChanges();
+  // Phones can get a new push address after updates; re-register quietly.
+  if (state.settings.notifications && 'Notification' in window && Notification.permission === 'granted') subscribePush();
+}
+
+/* ---------- Push notifications (reminders with the app closed) ---------- */
+
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && !!cfg.vapidPublicKey;
+
+function keyBytes(b64url) {
+  const s = atob(b64url.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - b64url.length % 4) % 4));
+  return Uint8Array.from(s, c => c.charCodeAt(0));
+}
+
+// Registers this phone with the studio so the daily job can reach it.
+async function subscribePush() {
+  if (!pushSupported() || !sb || !session || !member) return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription()
+      || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(cfg.vapidPublicKey) });
+    const { error } = await sb.from('push_subscriptions').upsert(
+      { endpoint: sub.endpoint, subscription: sub.toJSON(), user_id: session.user.id, studio_id: member.studioId },
+      { onConflict: 'endpoint' });
+    if (error) throw error;
+    if (!state.settings.push) { state.settings.push = true; save(); }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function unsubscribePush() {
+  state.settings.push = false;
+  save();
+  if (!pushSupported()) return;
+  try {
+    const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+    if (!sub) return;
+    if (sb && session) await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+    await sub.unsubscribe();
+  } catch (e) { /* nothing left to clean up */ }
 }
 
 async function setNotifications(on, input) {
-  if (!on) { state.settings.notifications = false; save(); return; }
+  if (!on) { state.settings.notifications = false; save(); unsubscribePush(); return; }
   if (!('Notification' in window)) { input.checked = false; toast('Add the app to your Home Screen to turn on notifications.'); return; }
   let perm = Notification.permission;
   if (perm === 'default') perm = await Notification.requestPermission();
   if (perm !== 'granted') { input.checked = false; state.settings.notifications = false; save(); render(); toast('Notifications were not allowed.'); return; }
   state.settings.notifications = true;
   save();
-  notify('Reminders are on', 'You\'ll get a heads-up when a batch is ready.');
+  const pushed = await subscribePush();
+  notify('Reminders are on', pushed
+    ? 'You\'ll get a notification the morning a batch is ready, even with the app closed.'
+    : 'You\'ll get a heads-up when you open the app and a batch is ready.');
 }
 
 function exportData() {
@@ -1166,7 +1212,7 @@ function checkReminders() {
     for (const b of state[KIND[kind].list]) {
       const info = batchInfo(b);
       if (info.ready && !b.notifiedReady) {
-        alerts.push([`${b.name} is ready`, kind === 'tincture' ? 'Time to strain and bottle it.' : 'The oil is ready. Time to make the salve.']);
+        alerts.push([`${b.name} is ready`, kind === 'tincture' ? 'Time to strain and bottle it.' : 'The oil is ready. Time to make the salve.', 'ready']);
         b.notifiedReady = true;
       }
     }
@@ -1178,7 +1224,8 @@ function checkReminders() {
   }
   if (!alerts.length) return;
   save();
-  alerts.forEach(([t, body]) => notify(t, body));
+  // With push on, the morning notification already covered "ready"; just show the in-app banner.
+  alerts.forEach(([t, body, kind]) => { if (!(kind === 'ready' && state.settings.push)) notify(t, body); });
   toast(alerts.length === 1 ? `${alerts[0][0]}. ${alerts[0][1]}` : `Reminders: ${alerts.map(a => a[0]).join(' · ')}`, 6000);
 }
 
